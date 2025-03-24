@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Union, Any
 from datetime import datetime
 
 # Initialize the MCP server
-mcp = FastMCP("Terminal Command Runner MCP")
+mcp = FastMCP("Terminal Command Runner MCP", port=7443, log_level="DEBUG")
 
 # Store for active command sessions
 active_sessions = {}
@@ -866,4 +866,7 @@ def calculate(expression: str) -> Dict[str, Union[float, str]]:
 if __name__ == "__main__":
     # Set up the server
     import uvicorn
+    print("Starting server from MAIN")
     uvicorn.run(mcp.app, host="0.0.0.0", port=8000)
+
+mcp.run(transport="sse")
