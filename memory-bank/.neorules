@@ -1,0 +1,40 @@
+# Terminal Command Runner MCP - Project Rules and Patterns
+
+## Testing Patterns
+
+- Use pytest for all unit and integration tests
+- Create test files with naming pattern `test_*.py`
+- Use fixtures for test setup and teardown
+- Mock system operations when possible to maintain test isolation
+- Separate unit tests from integration tests
+- Use temporary directories and files for file operation tests
+- For command execution, use safe commands like `echo`, `cat`, etc.
+
+## Code Style
+
+- Follow PEP 8 for Python code style
+- Use type hints for function parameters and return values
+- Document functions with docstrings (Google style)
+- Keep functions focused on a single responsibility
+- Use meaningful variable and function names
+
+## Project Organization
+
+- Keep main server code in server.py
+- Place tests in a separate tests/ directory
+- Use conftest.py for shared pytest fixtures
+- Keep test data in tests/data/ directory
+
+## Development Workflow
+
+- Run tests before committing changes
+- Use virtual environment for dependency isolation
+- Document changes in progress.md
+- Update active-context.md when shifting focus
+
+## Common Test Commands
+
+- Run all tests: `pytest`
+- Run specific test file: `pytest tests/test_file.py`
+- Run with coverage: `pytest --cov=.`
+- Run with verbose output: `pytest -v` 

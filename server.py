@@ -14,16 +14,16 @@ import queue
 import json
 from typing import Dict, List, Optional, Union, Any
 from datetime import datetime
+import socket
+import math
 
 # Initialize the MCP server
 mcp = FastMCP("Terminal Command Runner MCP", port=7443, log_level="DEBUG")
 
-# Store for active command sessions
-active_sessions = {}
-# Command blacklist (can be modified at runtime)
-blacklisted_commands = set(['rm -rf /', 'mkfs'])
-# Lock for thread safety
+# Global variables for process management
 session_lock = threading.Lock()
+active_sessions = {}
+blacklisted_commands = set(['rm -rf /', 'mkfs'])
 output_queues = {}
 
 def is_command_safe(cmd: str) -> bool:
@@ -258,98 +258,153 @@ def force_terminate(pid: int) -> Dict[str, Any]:
         }
 
 @mcp.tool()
-def list_sessions() -> Dict[str, List[Dict[str, Any]]]:
+def list_sessions() -> Dict[str, Any]:
     """
     List all active command sessions
     
     Returns:
-        Dictionary with list of active sessions
+        Dictionary with active sessions information
     """
     with session_lock:
-        # Convert to list to avoid dictionary changing during iteration
-        sessions = list(active_sessions.values())
+        sessions = []
+        for pid, session in active_sessions.items():
+            sessions.append({
+                "pid": pid,
+                "command": session["command"],
+                "start_time": session["start_time"],
+                "session_id": session["session_id"]
+            })
     
-    # Add runtime to each session
-    for session in sessions:
-        start_time = datetime.fromisoformat(session["start_time"])
-        runtime_seconds = (datetime.now() - start_time).total_seconds()
-        session["runtime_seconds"] = round(runtime_seconds, 2)
-    
-    return {"sessions": sessions}
+    return {
+        "success": True,
+        "sessions": sessions,
+        "count": len(sessions)
+    }
 
 @mcp.tool()
-def list_processes() -> Dict[str, List[Dict[str, Any]]]:
+def list_processes() -> Dict[str, Any]:
     """
-    List all processes on the system
+    List all system processes
     
     Returns:
-        Dictionary with list of processes
+        Dictionary with system processes information
     """
     try:
-        result = subprocess.run(
-            ["ps", "aux"], 
-            capture_output=True, 
-            text=True, 
-            check=True
-        )
-        
         processes = []
-        for line in result.stdout.splitlines()[1:]:  # Skip header
-            parts = line.split(None, 10)
-            if len(parts) >= 11:
-                process = {
-                    "user": parts[0],
-                    "pid": int(parts[1]),
-                    "cpu": float(parts[2]),
-                    "mem": float(parts[3]),
-                    "vsz": parts[4],
-                    "rss": parts[5],
-                    "tty": parts[6],
-                    "stat": parts[7],
-                    "start": parts[8],
-                    "time": parts[9],
-                    "command": parts[10]
-                }
-                processes.append(process)
         
-        return {"processes": processes}
+        # Use different commands based on platform
+        if platform.system() == "Windows":
+            # Windows implementation using wmic
+            output = subprocess.check_output(["wmic", "process", "get", "ProcessId,Name,CommandLine,ParentProcessId,ExecutablePath,Priority,ThreadCount /format:csv"], 
+                                             text=True)
+            lines = output.strip().split('\n')
+            if len(lines) > 1:  # Skip header
+                header = lines[0].strip().split(',')
+                for line in lines[1:]:
+                    if line.strip():
+                        parts = line.strip().split(',')
+                        process = {}
+                        for i, field in enumerate(header):
+                            if i < len(parts):
+                                process[field.lower()] = parts[i]
+                        
+                        if "processid" in process:
+                            try:
+                                process["pid"] = int(process["processid"])
+                                processes.append(process)
+                            except ValueError:
+                                pass
+        else:
+            # Unix/Linux/macOS implementation using ps
+            output = subprocess.check_output(["ps", "-eo", "pid,ppid,user,stat,pcpu,pmem,command"], text=True)
+            lines = output.strip().split('\n')
+            if len(lines) > 0:  # Has at least header
+                header = lines[0].strip().split()
+                for line in lines[1:]:
+                    if line.strip():
+                        parts = line.strip().split(None, 6)  # Split for up to 7 columns
+                        if len(parts) >= 7:
+                            try:
+                                process = {
+                                    "pid": int(parts[0]),
+                                    "ppid": int(parts[1]),
+                                    "username": parts[2],
+                                    "state": parts[3],
+                                    "cpu_percent": float(parts[4]),
+                                    "memory_percent": float(parts[5]),
+                                    "command": parts[6],
+                                    "name": os.path.basename(parts[6].split()[0])
+                                }
+                                processes.append(process)
+                            except (ValueError, IndexError):
+                                pass
+        
+        return {
+            "success": True,
+            "processes": processes,
+            "count": len(processes)
+        }
     except Exception as e:
-        return {"error": str(e), "processes": []}
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 @mcp.tool()
 def kill_process(pid: int, signal_type: str = "TERM") -> Dict[str, Any]:
     """
-    Kill a process by PID
+    Terminate a process by PID
     
     Args:
         pid: Process ID to kill
-        signal_type: Signal to send ("TERM" for graceful, "KILL" for force)
+        signal_type: Signal to send (TERM, KILL, etc.)
     
     Returns:
-        Dictionary with kill status
+        Dictionary with operation status
     """
     try:
-        sig = signal.SIGTERM if signal_type == "TERM" else signal.SIGKILL
-        os.kill(pid, sig)
+        # Determine signal to send
+        if platform.system() == "Windows":
+            # On Windows, just use taskkill
+            if signal_type == "KILL":
+                subprocess.check_call(["taskkill", "/F", "/PID", str(pid)])
+            else:
+                subprocess.check_call(["taskkill", "/PID", str(pid)])
+        else:
+            # On Unix-like systems, map string signal names to signal numbers
+            signal_map = {
+                "TERM": signal.SIGTERM,
+                "KILL": signal.SIGKILL,
+                "INT": signal.SIGINT,
+                "HUP": signal.SIGHUP,
+                "QUIT": signal.SIGQUIT
+            }
+            
+            sig = signal_map.get(signal_type.upper(), signal.SIGTERM)
+            os.kill(pid, sig)
+        
+        # Check if this was an active session and remove it
+        with session_lock:
+            if pid in active_sessions:
+                del active_sessions[pid]
+        
         return {
             "success": True,
-            "message": f"Process {pid} sent signal {signal_type}"
-        }
-    except ProcessLookupError:
-        return {
-            "success": False,
-            "message": f"Process {pid} not found"
+            "pid": pid,
+            "signal": signal_type
         }
     except Exception as e:
         return {
             "success": False,
-            "message": f"Error killing process {pid}: {str(e)}"
+            "error": str(e)
         }
+
+# Command Control Tools
 
 @mcp.tool()
 def block_command(command: str) -> Dict[str, Any]:
     """
-    Add a command pattern to the blacklist
+    Add a command to the blacklist
     
     Args:
         command: Command pattern to block
@@ -357,17 +412,23 @@ def block_command(command: str) -> Dict[str, Any]:
     Returns:
         Dictionary with operation status
     """
-    blacklisted_commands.add(command)
-    return {
-        "success": True,
-        "message": f"Command pattern '{command}' added to blacklist",
-        "current_blacklist": list(blacklisted_commands)
-    }
+    try:
+        blacklisted_commands.add(command)
+        return {
+            "success": True,
+            "message": f"Command '{command}' added to blacklist",
+            "blacklist": list(blacklisted_commands)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 @mcp.tool()
 def unblock_command(command: str) -> Dict[str, Any]:
     """
-    Remove a command pattern from the blacklist
+    Remove a command from the blacklist
     
     Args:
         command: Command pattern to unblock
@@ -375,184 +436,200 @@ def unblock_command(command: str) -> Dict[str, Any]:
     Returns:
         Dictionary with operation status
     """
-    if command in blacklisted_commands:
-        blacklisted_commands.remove(command)
+    try:
+        if command in blacklisted_commands:
+            blacklisted_commands.remove(command)
+            message = f"Command '{command}' removed from blacklist"
+        else:
+            message = f"Command '{command}' was not in blacklist"
+        
         return {
             "success": True,
-            "message": f"Command pattern '{command}' removed from blacklist",
-            "current_blacklist": list(blacklisted_commands)
+            "message": message,
+            "blacklist": list(blacklisted_commands)
         }
-    else:
+    except Exception as e:
         return {
             "success": False,
-            "message": f"Command pattern '{command}' not found in blacklist",
-            "current_blacklist": list(blacklisted_commands)
+            "error": str(e)
         }
 
 # Filesystem Tools
 
 @mcp.tool()
-def read_file(path: str, max_size_mb: float = 10) -> Dict[str, Any]:
+def read_file(path: str, max_size_mb: float = 10.0) -> Dict[str, Any]:
     """
-    Read contents of a file
+    Read file contents with size limits
     
     Args:
-        path: Path to the file
-        max_size_mb: Maximum file size to read in MB
+        path: Path to the file to read
+        max_size_mb: Maximum file size in MB to read (default: 10MB)
     
     Returns:
-        Dictionary with file content or error
+        Dictionary with file content and metadata
     """
     try:
-        # Ensure the path exists and is a file
-        if not os.path.exists(path):
-            return {"success": False, "error": f"File not found: {path}"}
-        
-        if not os.path.isfile(path):
-            return {"success": False, "error": f"Path is not a file: {path}"}
-        
-        # Check file size
-        file_size_bytes = os.path.getsize(path)
+        # Convert MB to bytes
         max_size_bytes = int(max_size_mb * 1024 * 1024)
         
-        if file_size_bytes > max_size_bytes:
+        # Check if file exists
+        if not os.path.exists(path):
             return {
-                "success": False, 
-                "error": f"File size ({file_size_bytes / 1024 / 1024:.2f} MB) exceeds maximum allowed ({max_size_mb} MB)"
+                "success": False,
+                "error": f"File not found: {path}"
             }
         
-        # Read the file
-        with open(path, 'r', errors='replace') as f:
+        # Check file size
+        file_size = os.path.getsize(path)
+        if file_size > max_size_bytes:
+            return {
+                "success": False,
+                "error": f"File exceeds size limit of {max_size_mb}MB (actual size: {file_size / (1024 * 1024):.2f}MB)"
+            }
+        
+        # Read file content
+        with open(path, 'r', encoding='utf-8') as f:
             content = f.read()
         
         return {
             "success": True,
             "content": content,
-            "size_bytes": file_size_bytes,
+            "size": file_size,
             "path": path
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 @mcp.tool()
-def write_file(path: str, content: str, create_dirs: bool = True) -> Dict[str, Any]:
+def write_file(path: str, content: str, create_dirs: bool = False) -> Dict[str, Any]:
     """
     Write content to a file
     
     Args:
-        path: Path to the file
-        content: Content to write
+        path: Path to the file to write
+        content: Content to write to the file
         create_dirs: Whether to create parent directories if they don't exist
     
     Returns:
         Dictionary with operation status
     """
     try:
-        # Ensure parent directory exists if requested
+        # Create parent directories if needed
         if create_dirs:
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         
-        # Write to the file
-        with open(path, 'w') as f:
+        # Write content to file
+        with open(path, 'w', encoding='utf-8') as f:
             f.write(content)
         
         return {
             "success": True,
-            "message": f"Successfully wrote {len(content)} bytes to {path}",
             "path": path,
-            "size_bytes": len(content)
+            "size": len(content)
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 @mcp.tool()
 def create_directory(path: str) -> Dict[str, Any]:
     """
-    Create a directory
+    Create a new directory
     
     Args:
-        path: Path to create
+        path: Path to the directory to create
     
     Returns:
         Dictionary with operation status
     """
     try:
-        os.makedirs(path, exist_ok=True)
+        # Check if directory already exists
+        if os.path.exists(path):
+            if os.path.isdir(path):
+                return {
+                    "success": False,
+                    "error": f"Directory already exists: {path}"
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"Path exists but is not a directory: {path}"
+                }
+        
+        # Create directory and parents
+        os.makedirs(path)
+        
         return {
             "success": True,
-            "message": f"Directory created: {path}",
             "path": path
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 @mcp.tool()
 def list_directory(path: str, show_hidden: bool = False) -> Dict[str, Any]:
     """
-    List contents of a directory
+    List directory contents
     
     Args:
-        path: Directory to list
-        show_hidden: Whether to include hidden files
+        path: Path to the directory to list
+        show_hidden: Whether to include hidden files (starting with .) in the output
     
     Returns:
         Dictionary with directory contents
     """
     try:
+        # Check if directory exists
         if not os.path.exists(path):
-            return {"success": False, "error": f"Path does not exist: {path}"}
+            return {
+                "success": False,
+                "error": f"Directory not found: {path}"
+            }
         
         if not os.path.isdir(path):
-            return {"success": False, "error": f"Path is not a directory: {path}"}
+            return {
+                "success": False,
+                "error": f"Path is not a directory: {path}"
+            }
         
-        items = []
+        # List directory contents
+        contents = []
         for item in os.listdir(path):
-            # Skip hidden files if not requested
+            # Skip hidden files if not showing them
             if not show_hidden and item.startswith('.'):
                 continue
             
-            full_path = os.path.join(path, item)
-            stats = os.stat(full_path)
+            item_path = os.path.join(path, item)
+            is_dir = os.path.isdir(item_path)
             
-            # Determine item type
-            if os.path.isdir(full_path):
-                item_type = "directory"
-            elif os.path.islink(full_path):
-                item_type = "symlink"
-            elif os.path.isfile(full_path):
-                item_type = "file"
-            else:
-                item_type = "other"
+            # Get item stats
+            stats = os.stat(item_path)
             
-            # Format permissions
-            mode = stats.st_mode
-            perms = ""
-            for who in "USR", "GRP", "OTH":
-                for what in "R", "W", "X":
-                    if mode & getattr(stat, "S_I" + what + who):
-                        perms += what.lower()
-                    else:
-                        perms += "-"
-            
-            items.append({
+            contents.append({
                 "name": item,
-                "type": item_type,
-                "full_path": full_path,
-                "size_bytes": stats.st_size,
-                "modified": datetime.fromtimestamp(stats.st_mtime).isoformat(),
-                "permissions": perms,
-                "owner": stats.st_uid,
-                "group": stats.st_gid
+                "type": "directory" if is_dir else "file",
+                "size": stats.st_size if not is_dir else 0,
+                "modified": stats.st_mtime
             })
         
         return {
             "success": True,
             "path": path,
-            "items": items,
-            "count": len(items)
+            "contents": contents
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 @mcp.tool()
 def move_file(source: str, destination: str) -> Dict[str, Any]:
@@ -560,313 +637,321 @@ def move_file(source: str, destination: str) -> Dict[str, Any]:
     Move or rename a file or directory
     
     Args:
-        source: Source path
-        destination: Destination path
+        source: Path to the source file or directory
+        destination: Path to the destination
     
     Returns:
         Dictionary with operation status
     """
     try:
-        # Ensure source exists
+        # Check if source exists
         if not os.path.exists(source):
-            return {"success": False, "error": f"Source path does not exist: {source}"}
-        
-        # Create parent directories if they don't exist
-        dest_dir = os.path.dirname(destination)
-        if dest_dir and not os.path.exists(dest_dir):
-            os.makedirs(dest_dir, exist_ok=True)
+            return {
+                "success": False,
+                "error": f"Source path not found: {source}"
+            }
         
         # Move the file or directory
         shutil.move(source, destination)
         
         return {
             "success": True,
-            "message": f"Successfully moved {source} to {destination}",
             "source": source,
             "destination": destination
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 @mcp.tool()
-def search_files(directory: str, pattern: str, recursive: bool = True, max_results: int = 100) -> Dict[str, Any]:
+def search_files(path: str, pattern: str, recursive: bool = True, max_results: int = 100) -> Dict[str, Any]:
     """
-    Search for files matching a pattern
+    Find files matching a pattern
     
     Args:
-        directory: Directory to search in
-        pattern: Glob pattern for matching files
-        recursive: Whether to search subdirectories
+        path: Directory to search in
+        pattern: Glob pattern to match files against
+        recursive: Whether to search recursively in subdirectories
         max_results: Maximum number of results to return
     
     Returns:
         Dictionary with matching files
     """
     try:
-        if not os.path.exists(directory) or not os.path.isdir(directory):
-            return {"success": False, "error": f"Directory does not exist: {directory}"}
+        # Check if directory exists
+        if not os.path.exists(path):
+            return {
+                "success": False,
+                "error": f"Directory not found: {path}"
+            }
         
-        # Prepare search path
-        search_path = os.path.join(directory, "**", pattern) if recursive else os.path.join(directory, pattern)
+        if not os.path.isdir(path):
+            return {
+                "success": False,
+                "error": f"Path is not a directory: {path}"
+            }
+        
+        # Set up glob pattern
+        if recursive:
+            search_pattern = os.path.join(path, "**", pattern)
+        else:
+            search_pattern = os.path.join(path, pattern)
         
         # Find matching files
         matches = []
-        for path in glob.glob(search_path, recursive=recursive):
+        for file_path in glob.glob(search_pattern, recursive=recursive):
             if len(matches) >= max_results:
                 break
-                
-            stats = os.stat(path)
-            matches.append({
-                "path": path,
-                "size_bytes": stats.st_size,
-                "modified": datetime.fromtimestamp(stats.st_mtime).isoformat(),
-                "type": "directory" if os.path.isdir(path) else "file"
-            })
+            
+            # Get relative path from search directory
+            rel_path = os.path.relpath(file_path, path)
+            matches.append(rel_path)
         
         return {
             "success": True,
-            "matches": matches,
-            "count": len(matches),
+            "path": path,
             "pattern": pattern,
-            "directory": directory,
+            "matches": matches,
             "truncated": len(matches) >= max_results
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 @mcp.tool()
 def get_file_info(path: str) -> Dict[str, Any]:
     """
-    Get detailed information about a file
+    Get metadata about a file or directory
     
     Args:
-        path: Path to the file
+        path: Path to the file or directory
     
     Returns:
-        Dictionary with file information
+        Dictionary with file metadata
     """
     try:
-        if not os.path.exists(path):
-            return {"success": False, "error": f"Path does not exist: {path}"}
-        
-        stats = os.stat(path)
-        info = {
-            "path": path,
-            "exists": True,
-            "size_bytes": stats.st_size,
-            "type": "directory" if os.path.isdir(path) else "file",
-            "is_symlink": os.path.islink(path),
-            "created": datetime.fromtimestamp(stats.st_ctime).isoformat(),
-            "modified": datetime.fromtimestamp(stats.st_mtime).isoformat(),
-            "accessed": datetime.fromtimestamp(stats.st_atime).isoformat(),
-            "owner": stats.st_uid,
-            "group": stats.st_gid,
-            "permissions_octal": oct(stats.st_mode)[-3:],
-            "absolute_path": os.path.abspath(path)
-        }
-        
-        # Add mime type for files
-        if os.path.isfile(path):
-            try:
-                import magic
-                info["mime_type"] = magic.from_file(path, mime=True)
-            except ImportError:
-                # Fall back to simple extension check if python-magic not available
-                extension = os.path.splitext(path)[1].lower()
-                mime_map = {
-                    '.txt': 'text/plain',
-                    '.py': 'text/x-python',
-                    '.js': 'application/javascript',
-                    '.html': 'text/html',
-                    '.css': 'text/css',
-                    '.json': 'application/json',
-                    '.xml': 'application/xml',
-                    '.md': 'text/markdown',
-                    '.png': 'image/png',
-                    '.jpg': 'image/jpeg',
-                    '.jpeg': 'image/jpeg',
-                    '.gif': 'image/gif',
-                    '.pdf': 'application/pdf'
-                }
-                info["mime_type"] = mime_map.get(extension, 'application/octet-stream')
-        
-        return {
+        # Common result structure for all cases
+        result = {
             "success": True,
-            "info": info
+            "path": path,
+            "exists": os.path.exists(path)
         }
+        
+        # If path doesn't exist, return early
+        if not result["exists"]:
+            return result
+        
+        # Get file stats
+        stats = os.stat(path)
+        
+        # Determine type
+        if os.path.isdir(path):
+            result["type"] = "directory"
+        else:
+            result["type"] = "file"
+            
+        # Add more metadata
+        result["size"] = stats.st_size
+        result["modified"] = stats.st_mtime
+        result["created"] = stats.st_ctime
+        result["permissions"] = oct(stats.st_mode)[-3:]  # Last 3 digits of octal representation
+        
+        return result
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 # Edit Tools
 
 @mcp.tool()
-def edit_block(edit_block: str) -> Dict[str, Any]:
+def edit_block(content: str) -> Dict[str, Any]:
     """
-    Apply surgical text replacements to a file
+    Apply edits to a file with a diff-like syntax
     
     Args:
-        edit_block: Block of text with filepath and search/replace sections
-                   Format:
-                   filepath.ext
-                   <<<<<<< SEARCH
-                   existing code to replace
-                   =======
-                   new code to insert
-                   >>>>>>> REPLACE
+        content: Edit block in the format:
+                 @@ file_path
+                 new content
+                 to write
     
     Returns:
-        Dictionary with edit operation status
+        Dictionary with operation status
     """
     try:
-        # Parse the edit block
-        lines = edit_block.strip().split('\n')
+        lines = content.strip().split("\n")
         
-        if len(lines) < 5:  # Need at minimum: filename, search marker, search text, replace marker, replace text, end marker
-            return {"success": False, "error": "Edit block format invalid: too few lines"}
+        # Extract the file path from the first line
+        if not lines or not lines[0].startswith("@@"):
+            return {
+                "success": False,
+                "error": "Invalid edit block format. First line must start with @@ followed by file path"
+            }
         
-        filepath = lines[0].strip()
+        file_path = lines[0][2:].strip()
+        if not file_path:
+            return {
+                "success": False,
+                "error": "No file path specified in the edit block"
+            }
         
-        # Find the markers
-        search_start = -1
-        separator = -1
-        replace_end = -1
+        # Extract the new content (all lines after the first)
+        new_content = "\n".join(lines[1:])
         
-        for i, line in enumerate(lines):
-            if "<<<<<<< SEARCH" in line:
-                search_start = i
-            elif "=======" in line and search_start != -1 and separator == -1:
-                separator = i
-            elif ">>>>>>> REPLACE" in line and separator != -1:
-                replace_end = i
-                break
-        
-        if search_start == -1 or separator == -1 or replace_end == -1:
-            return {"success": False, "error": "Edit block format invalid: missing markers"}
-        
-        # Extract search and replace strings
-        search_text = "\n".join(lines[search_start + 1:separator])
-        replace_text = "\n".join(lines[separator + 1:replace_end])
-        
-        # Read the original file
-        if not os.path.exists(filepath):
-            return {"success": False, "error": f"File not found: {filepath}"}
-        
-        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-            original_content = f.read()
-        
-        # Check if search text exists exactly once
-        if search_text not in original_content:
-            return {"success": False, "error": f"Search text not found in {filepath}"}
-        
-        if original_content.count(search_text) > 1:
-            return {"success": False, "error": f"Search text appears multiple times in {filepath}, ambiguous which to replace"}
-        
-        # Make the replacement
-        new_content = original_content.replace(search_text, replace_text)
-        
-        # Write back to the file
-        with open(filepath, 'w', encoding='utf-8') as f:
+        # Write to the file
+        with open(file_path, "w", encoding="utf-8") as f:
             f.write(new_content)
         
         return {
             "success": True,
-            "message": f"Successfully updated {filepath}",
-            "filepath": filepath,
-            "chars_changed": len(new_content) - len(original_content)
+            "file": file_path,
+            "size": len(new_content)
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 # System Info
 
 @mcp.resource("info://system")
 def system_info() -> Dict[str, Any]:
-    """Get detailed system information"""
-    info = {
-        "os": {
-            "name": platform.system(),
+    """
+    Get detailed system information
+    
+    Returns:
+        Dictionary with system information
+    """
+    try:
+        info = {
+            "platform": platform.platform(),
+            "system": platform.system(),
+            "release": platform.release(),
             "version": platform.version(),
-            "release": platform.release()
-        },
-        "python": platform.python_version(),
-        "cpu": {
-            "cores": os.cpu_count(),
-            "architecture": platform.machine(),
-            "processor": platform.processor()
-        },
-        "hostname": platform.node(),
-        "time": {
-            "now": datetime.now().isoformat(),
-            "utc": datetime.utcnow().isoformat(),
-            "uptime": None  # Will be filled if available
+            "architecture": platform.architecture(),
+            "machine": platform.machine(),
+            "processor": platform.processor(),
+            "python_version": platform.python_version(),
+            "node": platform.node(),
+            "hostname": socket.gethostname(),
+            "cpu_count": os.cpu_count() or 0,
+            "timezone": time.tzname,
+            "current_time": datetime.now().isoformat(),
+            "uptime": None  # Will be filled conditionally
         }
-    }
-    
-    # Try to get uptime
-    try:
-        with open('/proc/uptime', 'r') as f:
-            uptime_seconds = float(f.readline().split()[0])
-        info["time"]["uptime"] = round(uptime_seconds)
-    except:
-        pass
-    
-    # Try to get memory info
-    try:
-        with open('/proc/meminfo', 'r') as f:
-            mem_info = {}
-            for line in f:
-                key, value = line.split(':')
-                mem_info[key.strip()] = value.strip()
         
-        info["memory"] = {
-            "total": mem_info.get("MemTotal", "N/A"),
-            "free": mem_info.get("MemFree", "N/A"),
-            "available": mem_info.get("MemAvailable", "N/A")
+        # Get memory info if psutil is available
+        try:
+            import psutil
+            mem = psutil.virtual_memory()
+            info["memory"] = {
+                "total": mem.total,
+                "available": mem.available,
+                "percent_used": mem.percent
+            }
+            info["uptime"] = time.time() - psutil.boot_time()
+        except ImportError:
+            # psutil not available, try to get some info from os
+            if platform.system() == "Linux":
+                try:
+                    with open("/proc/uptime", "r") as f:
+                        uptime_seconds = float(f.readline().split()[0])
+                        info["uptime"] = uptime_seconds
+                except:
+                    pass
+                    
+                try:
+                    with open("/proc/meminfo", "r") as f:
+                        meminfo = {}
+                        for line in f:
+                            parts = line.split(":")
+                            if len(parts) == 2:
+                                key = parts[0].strip()
+                                value = parts[1].strip().split(" ")[0]
+                                meminfo[key] = int(value) * 1024  # Convert from KB to bytes
+                        
+                        info["memory"] = {
+                            "total": meminfo.get("MemTotal", 0),
+                            "available": meminfo.get("MemAvailable", 0),
+                            "percent_used": (1 - (meminfo.get("MemAvailable", 0) / meminfo.get("MemTotal", 1))) * 100
+                        }
+                except:
+                    pass
+        
+        return info
+    except Exception as e:
+        return {
+            "error": str(e)
         }
-    except:
-        info["memory"] = "N/A"
-    
-    # Try to get disk usage
-    try:
-        usage = shutil.disk_usage('/')
-        info["disk"] = {
-            "total_gb": round(usage.total / (1024**3), 2),
-            "used_gb": round(usage.used / (1024**3), 2),
-            "free_gb": round(usage.free / (1024**3), 2),
-            "percent_used": round(usage.used * 100 / usage.total, 2)
-        }
-    except:
-        info["disk"] = "N/A"
-    
-    return info
 
 # Add utility for calculating expressions
 @mcp.tool()
-def calculate(expression: str) -> Dict[str, Union[float, str]]:
+def calculate(expression: str) -> Dict[str, Any]:
     """
-    Evaluate mathematical expressions
+    Evaluate a mathematical expression
     
     Args:
         expression: Mathematical expression to evaluate
     
     Returns:
-        Dictionary with the result or error
+        Dictionary with evaluation result
     """
     try:
-        # Simple security check
-        if any(keyword in expression for keyword in ['import', 'exec', 'eval', 'open', '__']):
-            return {"error": "Potentially unsafe expression"}
+        # Create a safe environment with only mathematical functions and constants
+        safe_dict = {
+            "abs": abs, "max": max, "min": min,
+            "pow": pow, "round": round,
+            "sum": sum, "len": len,
+            "int": int, "float": float,
+            "pi": math.pi, "e": math.e,
+            "sqrt": math.sqrt, "exp": math.exp,
+            "log": math.log, "log10": math.log10,
+            "sin": math.sin, "cos": math.cos,
+            "tan": math.tan, "asin": math.asin,
+            "acos": math.acos, "atan": math.atan,
+            "ceil": math.ceil, "floor": math.floor
+        }
         
-        # Evaluate the expression
-        result = eval(expression, {"__builtins__": {}}, {"abs": abs, "max": max, "min": min, "pow": pow, "round": round})
-        return {"result": result}
+        # Check for suspicious patterns
+        suspicious_patterns = [
+            "import", "exec", "eval", "compile", 
+            "getattr", "setattr", "delattr",
+            "hasattr", "globals", "locals", 
+            "__", "os.", "sys.", "subprocess",
+            "lambda", "open", "file"
+        ]
+        
+        for pattern in suspicious_patterns:
+            if pattern in expression:
+                return {
+                    "success": False,
+                    "error": f"Expression contains suspicious pattern: {pattern}"
+                }
+        
+        # Evaluate the expression in the safe environment
+        result = eval(expression, {"__builtins__": {}}, safe_dict)
+        
+        return {
+            "success": True,
+            "expression": expression,
+            "result": result
+        }
     except Exception as e:
-        return {"error": str(e)}
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 if __name__ == "__main__":
     # Set up the server
     import uvicorn
     print("Starting server from MAIN")
     uvicorn.run(mcp.app, host="0.0.0.0", port=8000)
-
-mcp.run(transport="sse")
+    # Only run the SSE transport when the script is run directly
+    mcp.run(transport="sse")

@@ -53,6 +53,33 @@ python server.py
 
 The server will start on http://0.0.0.0:8000.
 
+## 🧪 Testing
+
+The project includes a comprehensive test suite to verify functionality:
+
+```bash
+# Install test dependencies
+uv pip install -r requirements.txt
+
+# Run all tests
+./run_tests.py
+
+# Run tests with coverage report
+./run_tests.py --coverage
+
+# Run tests with verbose output
+./run_tests.py --verbose
+
+# Run specific test file
+./run_tests.py --test tests/test_command_execution.py
+```
+
+The test suite covers:
+- Command execution and process management
+- File system operations
+- System utilities
+- Security features
+
 ## 🔧 Configuration
 
 Configure Cursor to use this MCP service by adding it to your `~/.cursor/mcp.json` file:
