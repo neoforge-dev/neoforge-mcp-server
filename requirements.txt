@@ -1,0 +1,6 @@
+fastapi==0.110.1
+uvicorn==0.26.1
+pydantic==2.6.4
+PyJWT==2.8.0
+python-multipart==0.0.7
+slowapi==0.1.9 
