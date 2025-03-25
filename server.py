@@ -954,4 +954,5 @@ if __name__ == "__main__":
     print("Starting server from MAIN")
     uvicorn.run(mcp.app, host="0.0.0.0", port=8000)
     # Only run the SSE transport when the script is run directly
-    mcp.run(transport="sse")
+
+mcp.run(transport="sse")
