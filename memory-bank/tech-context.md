@@ -111,4 +111,20 @@ The API consists of tool functions that can be invoked remotely:
 - **Threading**: Proper synchronization for concurrent operations
 - **Context Length**: Monitoring and managing LLM context usage
 - **Test Performance**: Parallel test execution and efficient coverage tracking
-- **System Monitoring**: Low-overhead performance metrics collection 
+- **System Monitoring**: Low-overhead performance metrics collection
+
+## Observability Stack
+
+### Distributed Tracing
+- OpenTelemetry integration for distributed tracing
+- OTLP exporter configured for trace collection
+- Automatic tracing for all MCP tools via decorator pattern
+- Configurable service name and version
+- Default endpoint: http://localhost:4317
+
+### Dependencies
+- OpenTelemetry packages:
+  - opentelemetry-api==1.31.1
+  - opentelemetry-sdk==1.31.1
+  - opentelemetry-exporter-otlp==1.31.1
+  - opentelemetry-semantic-conventions==0.52b1 

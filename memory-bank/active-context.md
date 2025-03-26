@@ -4,6 +4,9 @@
 - Implementing advanced MCP tools for development workflow optimization
 - Enhancing code analysis and performance monitoring capabilities
 - Improving LLM context management and testing infrastructure
+- Implementing metrics collection system
+- Adding profiling tools
+- Enhancing error tracking and reporting
 
 ## Recent Changes
 1. Added new MCP tools:
@@ -23,6 +26,12 @@
    - Updated .neorules with new patterns
    - Added comprehensive testing guidelines
 
+4. Added OpenTelemetry integration for distributed tracing
+   - Automatic tracing for all MCP tools
+   - Configurable trace collection endpoint
+   - Service name and version tracking
+   - Error and exception tracking in spans
+
 ## Active Decisions
 1. Code Analysis:
    - Using static analysis for security and complexity
@@ -38,6 +47,10 @@
    - Smart context management
    - Token usage optimization
    - Priority-based content filtering
+
+4. Using OpenTelemetry as the primary observability framework
+5. OTLP protocol for trace export
+6. Automatic tool wrapping for consistent tracing
 
 ## Next Steps
 1. Infrastructure Enhancement:
@@ -69,4 +82,8 @@
 3. Documentation:
    - Need API examples for new tools
    - Missing performance benchmarks
-   - Need more detailed setup guides 
+   - Need more detailed setup guides
+
+4. Need to implement metrics collection
+5. Profiling tools not yet integrated
+6. Error tracking needs enhancement 

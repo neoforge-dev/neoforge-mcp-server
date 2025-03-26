@@ -214,4 +214,35 @@ def tool_name(param1: Type1, param2: Type2 = default) -> Dict[str, Any]:
 ### System Documentation
 - Architecture overview
 - Component interaction
-- Deployment guides 
+- Deployment guides
+
+## Observability Patterns
+
+### Distributed Tracing Architecture
+1. **Trace Collection**
+   - OpenTelemetry SDK for trace generation
+   - OTLP exporter for trace export
+   - Configurable collection endpoint
+   - Batch processing for efficient trace export
+
+2. **Tool Tracing**
+   - Decorator pattern for automatic tool tracing
+   - Consistent span naming convention: `mcp.tool.<tool_name>`
+   - Automatic error and exception tracking
+   - Tool-specific attributes:
+     - Tool name
+     - Arguments
+     - Status
+     - Error details
+
+3. **Resource Attribution**
+   - Service name and version tracking
+   - OpenTelemetry semantic conventions
+   - Configurable resource attributes
+   - Dynamic resource updates
+
+4. **Error Handling**
+   - Exception capture in spans
+   - Error attribute propagation
+   - Status code tracking
+   - Automatic error context collection 
