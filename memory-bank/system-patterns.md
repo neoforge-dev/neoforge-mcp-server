@@ -274,4 +274,47 @@ def tool_name(param1: Type1, param2: Type2 = default) -> Dict[str, Any]:
    - Dynamic endpoint configuration
    - Metric recreation on config changes
    - Global meter provider management
-   - Metric reader configuration 
+   - Metric reader configuration
+
+## Profiling Architecture
+
+### Core Profiling System
+- **Global Profiler**: Singleton `MCPProfiler` instance manages profiling sessions
+- **Profiling States**: Active/inactive state management with session persistence
+- **Stats Management**: Automatic stats collection and file management
+- **Tool Integration**: Automatic profiling integration via decorators
+
+### Tool Profiling
+- **Decorator Pattern**: `@profile_tool` decorator for automatic profiling
+- **Stats Collection**:
+  - Execution time tracking
+  - Call count monitoring
+  - Function-level statistics
+  - Cumulative performance data
+- **File Management**:
+  - Temporary stats files for each profiling session
+  - Automatic cleanup on errors
+  - Stats file persistence for analysis
+
+### Code Block Profiling
+- **Dynamic Code Execution**: Profile arbitrary Python code blocks
+- **Context Management**:
+  - Isolated execution environment
+  - Custom globals dictionary support
+  - Temporary file handling for code and stats
+- **Results Format**:
+  - Human-readable stats output
+  - Stats file references
+  - Code file preservation
+
+### Integration Points
+- **Tool Registration**: Automatic profiling wrapper for all MCP tools
+- **Session Management**: Start/stop profiling on demand
+- **Stats Analysis**: Tools for examining profiling data
+- **Error Handling**: Graceful error management with cleanup
+
+### Best Practices
+- **Resource Management**: Automatic cleanup of temporary files
+- **State Handling**: Clear state transitions in profiling sessions
+- **Data Access**: Structured access to profiling statistics
+- **Tool Integration**: Non-intrusive profiling of existing tools 

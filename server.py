@@ -27,6 +27,10 @@ from opentelemetry.metrics import get_meter_provider, set_meter_provider
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+import cProfile
+import pstats
+import io
+import tempfile
 
 # Initialize the MCP server
 mcp = FastMCP("Terminal Command Runner MCP", port=7443, log_level="DEBUG")
@@ -2553,6 +2557,214 @@ def _parse_coverage_output(output: str) -> Dict[str, Any]:
                     pass
     
     return coverage_data
+
+class MCPProfiler:
+    """Profiler for MCP tools and operations"""
+    
+    def __init__(self):
+        self.profiler = cProfile.Profile()
+        self.active = False
+        self.stats = None
+        self.output_file = None
+    
+    def start(self, output_file: Optional[str] = None):
+        """Start profiling"""
+        if output_file:
+            self.output_file = output_file
+        self.active = True
+        self.profiler.enable()
+    
+    def stop(self) -> Optional[str]:
+        """Stop profiling and return stats"""
+        if not self.active:
+            return None
+            
+        self.profiler.disable()
+        self.active = False
+        
+        # Create stats object
+        s = io.StringIO()
+        stats = pstats.Stats(self.profiler, stream=s)
+        stats.sort_stats('cumulative')
+        stats.print_stats()
+        
+        # Save to file if specified
+        if self.output_file:
+            stats.dump_stats(self.output_file)
+            
+        return s.getvalue()
+    
+    def reset(self):
+        """Reset the profiler"""
+        self.profiler = cProfile.Profile()
+        self.active = False
+        self.stats = None
+
+# Initialize global profiler
+mcp_profiler = MCPProfiler()
+
+def profile_tool(func):
+    """Decorator to add profiling to MCP tools"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if mcp_profiler.active:
+            return func(*args, **kwargs)
+        
+        # Create temporary file for stats
+        with tempfile.NamedTemporaryFile(suffix='.prof', delete=False) as tmp:
+            mcp_profiler.start(tmp.name)
+            try:
+                result = func(*args, **kwargs)
+                stats = mcp_profiler.stop()
+                
+                # Add profiling info to result if it's a dict
+                if isinstance(result, dict):
+                    result['profiling'] = {
+                        'stats': stats,
+                        'stats_file': tmp.name
+                    }
+                return result
+            except Exception as e:
+                mcp_profiler.stop()
+                os.unlink(tmp.name)
+                raise
+            finally:
+                mcp_profiler.reset()
+    return wrapper
+
+@mcp.tool()
+def start_profiling() -> Dict[str, Any]:
+    """
+    Start profiling MCP tools
+    
+    Returns:
+        Dictionary with profiling status
+    """
+    try:
+        mcp_profiler.start()
+        return {
+            'status': 'success',
+            'message': 'Profiling started'
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
+@mcp.tool()
+def stop_profiling() -> Dict[str, Any]:
+    """
+    Stop profiling and get results
+    
+    Returns:
+        Dictionary with profiling results
+    """
+    try:
+        stats = mcp_profiler.stop()
+        if stats:
+            return {
+                'status': 'success',
+                'stats': stats
+            }
+        else:
+            return {
+                'status': 'error',
+                'message': 'No active profiling session'
+            }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
+@mcp.tool()
+def get_profiling_stats(stats_file: str) -> Dict[str, Any]:
+    """
+    Get profiling statistics from a stats file
+    
+    Args:
+        stats_file: Path to the stats file
+        
+    Returns:
+        Dictionary with profiling statistics
+    """
+    try:
+        if not os.path.exists(stats_file):
+            return {
+                'status': 'error',
+                'error': f'Stats file not found: {stats_file}'
+            }
+            
+        stats = pstats.Stats(stats_file)
+        s = io.StringIO()
+        stats.sort_stats('cumulative')
+        stats.print_stats()
+        
+        return {
+            'status': 'success',
+            'stats': s.getvalue()
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
+@mcp.tool()
+def profile_code(code: str, globals_dict: Optional[Dict] = None) -> Dict[str, Any]:
+    """
+    Profile a piece of Python code
+    
+    Args:
+        code: Python code to profile
+        globals_dict: Optional globals dictionary
+        
+    Returns:
+        Dictionary with profiling results
+    """
+    try:
+        # Create temporary file for the code
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as tmp:
+            tmp.write(code)
+            tmp.flush()
+            
+            # Create temporary file for stats
+            with tempfile.NamedTemporaryFile(suffix='.prof', delete=False) as stats_tmp:
+                # Profile the code execution
+                profiler = cProfile.Profile()
+                if globals_dict is None:
+                    globals_dict = {}
+                profiler.runctx(code, globals_dict, {}, stats_tmp.name)
+                
+                # Get stats
+                stats = pstats.Stats(profiler)
+                s = io.StringIO()
+                stats.sort_stats('cumulative')
+                stats.print_stats()
+                
+                return {
+                    'status': 'success',
+                    'stats': s.getvalue(),
+                    'stats_file': stats_tmp.name,
+                    'code_file': tmp.name
+                }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
+# Add profiling to all tools
+def add_profiling_to_tools():
+    """Add profiling to all registered MCP tools"""
+    for tool_name, tool_func in mcp.tools.items():
+        if not hasattr(tool_func, "_profiled"):
+            profiled_func = profile_tool(tool_func)
+            profiled_func._profiled = True
+            mcp.tools[tool_name] = profiled_func
+
+add_profiling_to_tools()
 
 if __name__ == "__main__":
     # Set up the server

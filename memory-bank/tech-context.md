@@ -144,4 +144,25 @@ The API consists of tool functions that can be invoked remotely:
 - psutil for system metrics collection
 - OpenTelemetry metrics packages:
   - opentelemetry-sdk-metrics
-  - opentelemetry-exporter-otlp-proto-grpc 
+  - opentelemetry-exporter-otlp-proto-grpc
+
+### Profiling Tools
+- cProfile integration for Python profiling
+- Custom MCP profiler for tool-specific profiling
+- Features:
+  - Global profiling session management
+  - Per-tool profiling with stats collection
+  - Code block profiling
+  - Stats file management
+- Profiling data:
+  - Execution time
+  - Call counts
+  - Cumulative statistics
+  - Function-level performance
+
+### Development Tools
+- Built-in profiling tools:
+  - start_profiling: Start global profiling session
+  - stop_profiling: Stop profiling and get results
+  - get_profiling_stats: Analyze stats files
+  - profile_code: Profile arbitrary Python code 

@@ -8,6 +8,9 @@
 - Adding profiling tools
 - Enhancing error tracking and reporting
 - Implementing monitoring dashboards
+- Implementing comprehensive profiling capabilities
+- Adding profiling tools for performance analysis
+- Integrating profiling with existing MCP tools
 
 ## Recent Changes
 1. Added new MCP tools:
@@ -39,6 +42,12 @@
    - Configurable metrics collection endpoint
    - Automatic metrics for all tools
 
+6. Added cProfile integration for Python profiling
+- Implemented custom MCP profiler
+- Created profiling tools (start_profiling, stop_profiling, get_profiling_stats, profile_code)
+- Added automatic profiling to all MCP tools
+- Updated documentation with profiling architecture
+
 ## Active Decisions
 1. Code Analysis:
    - Using static analysis for security and complexity
@@ -60,6 +69,11 @@
 6. Automatic tool wrapping for consistent tracing and metrics
 7. System resource monitoring with psutil
 
+8. Using cProfile for core profiling functionality
+9. Maintaining temporary files for stats persistence
+10. Automatic profiling integration via decorators
+11. Structured profiling results format
+
 ## Next Steps
 1. Infrastructure Enhancement:
    - Add distributed tracing support
@@ -78,6 +92,11 @@
    - Add load testing capabilities
    - Implement mutation testing
    - Add property-based testing
+
+4. Test profiling tools with various scenarios
+5. Add profiling data visualization
+6. Consider adding memory profiling
+7. Implement profiling data export formats
 
 ## Known Issues
 1. Performance:
