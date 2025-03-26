@@ -2,61 +2,437 @@
 
 ## Technology Stack
 
-- **Python**: Core implementation language (3.8+)
-- **FastMCP**: Framework for creating MCP servers (based on FastAPI)
-- **psutil**: System and process monitoring
-- **pytest**: Testing framework with parallel execution
-- **Subprocess**: Standard library for process execution
-- **Threading**: For concurrent execution and output streaming
-- **Queue**: Thread-safe data structures for output collection
-- **Signal**: For process control and termination
-- **OS**: Operating system interfaces for file and process operations
+### Core Technologies
+- Python 3.8+
+- FastAPI for API server
+- Click for CLI framework
+- Rich for terminal UI
+- OpenTelemetry for observability
+- pytest for testing
+- cmd for debugging interface
+- JSON for configuration storage
 
-## Development Setup & Conventions
+### Monitoring Stack
+- OpenTelemetry SDK for metrics collection
+- Prometheus for metrics storage and alerting
+- AlertManager for alert management
+- Grafana for visualization
+- Docker Compose for deployment
+- psutil for system metrics
 
-### Package Management
-- **uv**: Primary package manager for Python dependencies
-  - All dependencies must be installed using `uv add`
-  - Direct pip usage is not allowed
-  - Requirements are managed through `pyproject.toml`, not requirements.txt
+### Debugging Stack
+- cmd module for CLI interface
+- Rich for output formatting
+- inspect for introspection
+- pdb for debugging support
+- threading for synchronization
+- functools for decorators
 
-### Code Quality
-- **ruff**: Single tool for all code quality checks
-  - Replaces flake8, isort, and other linting tools
-  - Handles both linting and formatting
-  - Configuration in pyproject.toml
+### Development Tools
+- Black for code formatting
+- flake8 for linting
+- mypy for type checking
+- pytest for testing
+- coverage.py for code coverage
 
-### Testing
-- **pytest**: Primary testing framework
-  - Parallel test execution with pytest-xdist
-  - Coverage reporting with pytest-cov
-  - Test categorization (unit, integration)
-- **Docker**: For isolated testing environments
-- **Makefile**: For standardized test commands
+## Workspace Management
+- WorkspaceConfig dataclass for configuration
+- WorkspaceManager class for workspace operations
+- JSON-based configuration persistence
+- Directory-based workspace isolation
+- Tool-specific workspace directories
+- Environment variable management
+- Path management
+- Settings management
+- Rich console output
+
+## Development Setup
+
+### Prerequisites
+1. Python 3.8 or higher
+2. pip package manager
+3. virtualenv or similar virtual environment tool
+4. Docker and Docker Compose
+
+### Installation
+1. Create and activate virtual environment
+2. Install dependencies: `pip install -r requirements.txt`
+3. Install development dependencies: `pip install -r requirements-dev.txt`
+4. Start monitoring stack: `docker-compose up -d`
+
+### Running the Server
+1. Start the server: `python server.py [--debug]`
+2. Access API at `http://localhost:7443`
+3. Access Grafana at `http://localhost:3000`
+4. Access Prometheus at `http://localhost:9090`
+5. Access AlertManager at `http://localhost:9093`
+
+### Using the CLI
+1. Run CLI commands: `python cli.py [command] [options] [--debug]`
+2. Available command groups:
+   - `command`: Execute and manage commands
+   - `file`: File operations
+   - `system`: System operations
+   - `dev`: Development tools
+   - `debug`: Debugging tools
+
+### Debugging Tools
+1. Start debugger: Add `--debug` flag
+2. Available commands:
+   - `list_tools`: Show available tools
+   - `inspect`: View tool implementation
+   - `break`: Set breakpoints
+   - `watch`: Watch variables
+   - `info`: Show debug info
+   - `step`: Step execution
+   - `continue`: Resume execution
+   - `locals`: Show variables
+   - `stack`: Show call stack
+
+## Workspace Commands
+```bash
+# List workspaces
+mcp workspace list
+
+# Create workspace
+mcp workspace create <name> [description]
+
+# Delete workspace
+mcp workspace delete <name>
+
+# Activate workspace
+mcp workspace activate <name>
+
+# Deactivate workspace
+mcp workspace deactivate
+
+# Add tool to workspace
+mcp workspace tool add <name> <path>
+
+# Remove tool from workspace
+mcp workspace tool remove <name>
+
+# Set environment variable
+mcp workspace env set <key> <value>
+
+# Add path to workspace
+mcp workspace path add <path>
+
+# Remove path from workspace
+mcp workspace path remove <path>
+
+# Update settings
+mcp workspace settings update <key> <value>
+
+# Show workspace info
+mcp workspace info
+```
+
+## Debugging Commands
+```bash
+# List available tools
+debug list_tools
+
+# Inspect tool implementation
+debug inspect <tool_name>
+
+# Set breakpoint
+debug break <tool_name> <line_number>
+
+# Watch variable
+debug watch <variable_name>
+
+# Show debug info
+debug info
+
+# Step through execution
+debug step
+
+# Continue execution
+debug continue
+
+# Show local variables
+debug locals
+
+# Show call stack
+debug stack
+
+# Quit debugger
+debug quit
+```
 
 ## Technical Constraints
 
-- **Security**: Must prevent execution of dangerous commands
-- **Concurrency**: Must handle multiple concurrent processes
-- **Timeouts**: All operations should have configurable timeouts
-- **Error Handling**: All operations must have robust error handling
-- **Cross-Platform**: Core functionality should work across operating systems
-- **Context Management**: Must track and manage LLM context length
+### Performance
+- Command execution timeout limits
+- Resource usage monitoring
+- Profiling overhead management
+- Metric collection overhead
+- Alert processing latency
+- Debug mode overhead
+- Workspace switching overhead
+- Configuration persistence latency
+- Tool isolation impact
+
+### Security
+- Input validation
+- Command execution restrictions
+- File access controls
+- Monitoring access control
+- Alert access control
+- Debug access control
+- Workspace isolation
+- Tool access control
+- Environment separation
+
+### Scalability
+- Concurrent command execution
+- Resource management
+- Connection pooling
+- Metric storage scaling
+- Alert handling capacity
+- Debug session management
+- Workspace state consistency
+- Tool availability
+- Configuration persistence
 
 ## Dependencies
 
 ### Core Dependencies
-- **FastMCP**: For the MCP server implementation
-- **psutil**: System monitoring and metrics
-- **pytest**: Testing framework with plugins
-  - pytest-xdist: Parallel test execution
-  - pytest-cov: Coverage reporting
-- **Standard Library**: Core functionality relies only on Python standard library
+- FastAPI: Web framework
+- uvicorn: ASGI server
+- Click: CLI framework
+- Rich: Terminal UI
+- requests: HTTP client
+- psutil: System monitoring
+- OpenTelemetry: Observability
 
-### Development Tools
-- **uv**: Modern Python package manager
-- **ruff**: All-in-one Python linter and formatter
-- **pytest**: Testing framework with plugins
+### Monitoring Dependencies
+- opentelemetry-api: Core API
+- opentelemetry-sdk: Implementation
+- opentelemetry-exporter-prometheus: Prometheus export
+- opentelemetry-exporter-otlp: OTLP export
+- prometheus-client: Prometheus integration
+- psutil: System metrics
+
+### Debugging Dependencies
+- cmd: Command interface
+- inspect: Code introspection
+- rich: Output formatting
+- pdb: Python debugger
+- threading: Synchronization
+- functools: Decorators
+
+### Development Dependencies
+- pytest: Testing framework
+- black: Code formatter
+- flake8: Linter
+- mypy: Type checker
+- coverage: Code coverage
+
+### Alerting Dependencies
+- Prometheus: Alert rules engine
+- AlertManager: Alert routing
+- Slack API: Notifications
+- Email: Alternative notifications
+- Templates: Alert formatting
+
+### Workspace Dependencies
+- pathlib: Path management
+- dataclasses: Workspace configuration
+- typing: Type hints
+- shutil: Environment management
+- json: Configuration storage
+
+## Integration Points
+
+### External Systems
+- Command execution system
+- File system
+- Process management
+- System monitoring
+- Alert notification services
+- Debug interface
+
+### Internal Components
+- API server
+- CLI interface
+- Tool registry
+- Profiling system
+- Metrics collection
+- Alert management
+- Debug system
+
+### Monitoring Components
+- OpenTelemetry SDK
+- OpenTelemetry Collector
+- Prometheus server
+- Grafana dashboard
+- AlertManager
+- Notification channels
+
+### Debugging Components
+- Interactive console
+- Breakpoint manager
+- Variable watcher
+- History tracker
+- Stack inspector
+- Tool inspector
+
+## Configuration
+
+### Server Configuration
+- Host: localhost (default)
+- Port: 7443 (default)
+- Debug mode toggle
+- Logging level
+
+### CLI Configuration
+- Default timeout values
+- Output formatting options
+- Color scheme customization
+- Command history
+
+### Monitoring Configuration
+- Metric collection interval
+- Retention period
+- Dashboard refresh rate
+- Alert thresholds
+- Export endpoints
+
+### Debug Configuration
+- Tool registration
+- Breakpoint settings
+- Watch variables
+- History size
+- Output format
+- Session persistence
+
+### Alert Configuration
+- Rule definitions
+- Notification routing
+- Channel settings
+- Template customization
+- Grouping policies
+
+### Workspace Configuration
+- Base directory: ~/.mcp/workspaces
+- Config file: config.json
+- Tool directory: tools/
+- Data directory: data/
+- Log directory: logs/
+- Temp directory: temp/
+
+## Deployment
+
+### Requirements
+- Python runtime
+- System dependencies
+- Configuration files
+- Access permissions
+- Docker environment
+- Debug capabilities
+
+### Process
+1. Install dependencies
+2. Configure environment
+3. Start monitoring stack
+4. Configure alerts
+5. Enable debugging
+6. Start server
+7. Verify connectivity
+
+## Monitoring
+
+### System Metrics
+- CPU usage
+- Memory usage
+- Disk usage
+- Process count
+- Network I/O
+
+### Tool Metrics
+- Execution count
+- Error rate
+- Response time
+- Active tools
+- Resource usage
+
+### Alert Types
+- Resource alerts
+- Performance alerts
+- Error rate alerts
+- Prediction alerts
+- Health check alerts
+
+### Alert Channels
+- Slack notifications
+- Email notifications
+- Web hooks
+- Custom channels
+- Alert history
+
+## Testing
+
+### Test Types
+- Unit tests
+- Integration tests
+- System tests
+- Load tests
+- Alert tests
+- Debug tests
+
+### Test Coverage
+- Code coverage targets
+- Critical path testing
+- Error handling
+- Edge cases
+- Alert validation
+- Debug scenarios
+
+## Documentation
+
+### Code Documentation
+- Docstrings
+- Type hints
+- Comments
+- Examples
+- Alert descriptions
+- Debug instructions
+
+### User Documentation
+- API documentation
+- CLI usage guide
+- Tool descriptions
+- Alert response guide
+- Debug guide
+- Runbook templates
+
+## Future Considerations
+
+### Planned Features
+- Interactive debugging
+- Workspace management
+- Advanced profiling
+- Custom tool development
+- Alert correlation
+- Remote debugging
+- Templates
+- Sharing
+- Versioning
+- Migration
+- Plugins
+
+### Technical Debt
+- Test coverage improvements
+- Documentation updates
+- Code organization
+- Performance optimization
+- Alert refinement
+- Debug optimization
+- Configuration format
+- Tool isolation
+- Error handling
 
 ## API Structure
 
@@ -165,4 +541,455 @@ The API consists of tool functions that can be invoked remotely:
   - start_profiling: Start global profiling session
   - stop_profiling: Stop profiling and get results
   - get_profiling_stats: Analyze stats files
-  - profile_code: Profile arbitrary Python code 
+  - profile_code: Profile arbitrary Python code
+
+## L3 Coding Agent Tools
+
+### Autonomous Execution Tools
+- Plan Generation
+  - Task breakdown algorithms
+  - Dependency resolution
+  - Resource estimation
+  - Risk assessment
+  - Checkpoint planning
+
+- Execution Management
+  - State tracking
+  - Progress monitoring
+  - Error detection
+  - Recovery strategies
+  - Rollback mechanisms
+
+- Feature Implementation
+  - Code scaffolding
+  - Template generation
+  - Best practices enforcement
+  - Integration patterns
+  - Testing strategies
+
+### Validation Tools
+- Code Quality Analysis
+  - Static analysis
+  - Dynamic analysis
+  - Style checking
+  - Complexity metrics
+  - Best practices validation
+
+- Test Simulation
+  - Unit test generation
+  - Integration test simulation
+  - Edge case detection
+  - Coverage analysis
+  - Performance testing
+
+- Impact Analysis
+  - Dependency impact
+  - Performance impact
+  - Security implications
+  - Resource utilization
+  - Compatibility checking
+
+### Context Awareness Tools
+- Codebase Analysis
+  - AST parsing
+  - Semantic analysis
+  - Pattern detection
+  - Architecture mapping
+  - Dependency tracking
+
+- Context Management
+  - State persistence
+  - History tracking
+  - Pattern learning
+  - Knowledge base
+  - Context restoration
+
+- System Understanding
+  - Architecture analysis
+  - Component relationships
+  - Interface mapping
+  - Data flow analysis
+  - Control flow analysis
+
+### Iterative Problem-Solving
+- Solution Management
+  - Version control
+  - Alternative tracking
+  - Progress monitoring
+  - Success metrics
+  - Failure analysis
+
+- Learning System
+  - Pattern recognition
+  - Solution optimization
+  - Feedback integration
+  - Knowledge persistence
+  - Adaptation strategies
+
+- Optimization Engine
+  - Performance analysis
+  - Resource optimization
+  - Code simplification
+  - Refactoring suggestions
+  - Best practices application
+
+## Technical Requirements
+
+### Autonomous Execution
+- Safe execution environment
+- State management system
+- Rollback capabilities
+- Progress tracking
+- Error recovery mechanisms
+
+### Validation System
+- Real-time validation
+- Test simulation framework
+- Impact analysis tools
+- Security scanning
+- Performance profiling
+
+### Context Management
+- Graph database for relationships
+- Pattern recognition models
+- Knowledge persistence
+- State management
+- History tracking
+
+### Iterative Learning
+- Version control system
+- Pattern matching engine
+- Learning persistence
+- Feedback processing
+- Optimization algorithms
+
+## Dependencies
+
+### Core Systems
+- Graph databases (Neo4j/TigerGraph)
+- Machine learning frameworks (PyTorch/TensorFlow)
+- AST parsing tools (ast/astroid)
+- Pattern matching engines (regex/automata)
+- State management systems
+
+### Analysis Tools
+- Static analyzers (pylint/mypy)
+- Dynamic analyzers
+- Security scanners
+- Performance profilers
+- Coverage tools
+
+### Learning Systems
+- Pattern recognition models
+- Optimization algorithms
+- Knowledge bases
+- Feedback processors
+- Adaptation engines
+
+### Integration Tools
+- Version control systems
+- CI/CD pipelines
+- Testing frameworks
+- Documentation generators
+- Code formatters
+
+## Performance Considerations
+
+### Execution Speed
+- Task breakdown optimization
+- Parallel execution
+- Resource management
+- Cache utilization
+- State persistence
+
+### Memory Usage
+- Context storage optimization
+- Pattern database efficiency
+- History management
+- Cache strategies
+- Resource cleanup
+
+### Processing Overhead
+- Analysis optimization
+- Validation efficiency
+- Learning system performance
+- Pattern matching speed
+- State tracking overhead
+
+## Security Considerations
+
+### Code Execution
+- Sandboxed environments
+- Permission management
+- Resource limits
+- Input validation
+- Output sanitization
+
+### Data Management
+- Secure storage
+- Access control
+- Encryption
+- Audit logging
+- Compliance checking
+
+### Integration Security
+- API security
+- Authentication
+- Authorization
+- Rate limiting
+- Data validation
+
+## Technical Constraints
+
+### Performance
+- LLM response times
+- Token usage optimization
+- Resource management
+- Cache implementation
+
+### Security
+- API key management
+- Code execution isolation
+- Web access controls
+- Dependency validation
+
+### Scalability
+- Model switching
+- Parallel processing
+- Resource allocation
+- Cache management
+
+## Performance Considerations
+
+- **Output Streaming**: Efficient handling of process output
+- **Resource Management**: Proper cleanup of resources for long-running processes
+- **Memory Usage**: Careful handling of large file content or command output
+- **Threading**: Proper synchronization for concurrent operations
+- **Context Length**: Monitoring and managing LLM context usage
+- **Test Performance**: Parallel test execution and efficient coverage tracking
+- **System Monitoring**: Low-overhead performance metrics collection
+
+## Observability Stack
+
+### Distributed Tracing
+- OpenTelemetry integration for distributed tracing
+- OTLP exporter configured for trace collection
+- Automatic tracing for all MCP tools via decorator pattern
+- Configurable service name and version
+- Default endpoint: http://localhost:4317
+
+### Dependencies
+- OpenTelemetry packages:
+  - opentelemetry-api==1.31.1
+  - opentelemetry-sdk==1.31.1
+  - opentelemetry-exporter-otlp==1.31.1
+  - opentelemetry-semantic-conventions==0.52b1
+
+### Metrics Collection
+- OpenTelemetry Metrics integration
+- OTLP exporter for metrics collection
+- Default endpoint: http://localhost:4317
+- Key metrics:
+  - Tool execution duration (histogram)
+  - Tool call count (counter)
+  - Error count (counter)
+  - Active sessions (up/down counter)
+  - Memory usage (observable gauge)
+
+### System Dependencies
+- psutil for system metrics collection
+- OpenTelemetry metrics packages:
+  - opentelemetry-sdk-metrics
+  - opentelemetry-exporter-otlp-proto-grpc
+
+### Profiling Tools
+- cProfile integration for Python profiling
+- Custom MCP profiler for tool-specific profiling
+- Features:
+  - Global profiling session management
+  - Per-tool profiling with stats collection
+  - Code block profiling
+  - Stats file management
+- Profiling data:
+  - Execution time
+  - Call counts
+  - Cumulative statistics
+  - Function-level performance
+
+### Development Tools
+- Built-in profiling tools:
+  - start_profiling: Start global profiling session
+  - stop_profiling: Stop profiling and get results
+  - get_profiling_stats: Analyze stats files
+  - profile_code: Profile arbitrary Python code
+
+## Code Generation & Analysis Tools
+
+### Code Generation
+- **Models**:
+  - API-based:
+    - Claude-3-Sonnet (Anthropic)
+    - GPT-4 (OpenAI)
+  - Local:
+    - Code Llama (34B Python)
+    - StarCoder
+- **Features**:
+  - Multi-model support
+  - Context-aware generation
+  - Token tracking
+  - Performance metrics
+  - Error handling
+
+### Code Validation
+- **Checks**:
+  - Syntax validation (AST-based)
+  - Style checking (Ruff)
+  - Complexity analysis (McCabe)
+  - Security scanning (Bandit)
+  - Performance analysis
+- **Features**:
+  - Comprehensive validation suite
+  - Human-readable summaries
+  - Detailed recommendations
+  - Multi-language support (planned)
+
+## Technical Requirements
+
+### System Requirements
+- Python 3.8+
+- CUDA support (optional, for local models)
+- 16GB+ RAM (32GB+ recommended for local models)
+- SSD storage for model weights
+
+### Dependencies
+- **Core Libraries**:
+  - anthropic
+  - openai
+  - torch
+  - transformers
+  - bandit
+  - ruff
+- **Optional Libraries**:
+  - pytest (for testing)
+  - black (for formatting)
+  - mypy (for type checking)
+
+### API Requirements
+- Anthropic API key (for Claude)
+- OpenAI API key (for GPT-4)
+- Internet connection for API models
+
+## Performance Constraints
+
+### Code Generation
+- API models:
+  - Response time: < 2s
+  - Token limit: Model-specific
+  - Rate limits: Provider-specific
+- Local models:
+  - Response time: Hardware-dependent
+  - Memory usage: 16GB+ per model
+  - GPU memory: 24GB+ recommended
+
+### Code Validation
+- Validation time: < 100ms per check
+- Memory usage: < 1GB
+- CPU usage: Moderate
+
+## Security Considerations
+
+### API Security
+- Secure API key storage
+- Rate limiting
+- Request validation
+- Response sanitization
+
+### Code Security
+- Sandboxed execution
+- Input validation
+- Output sanitization
+- Dependency scanning
+
+## Implementation Details
+
+### Code Generation
+```python
+@mcp.tool()
+def generate_code(
+    prompt: str,
+    model: str = "claude-3-sonnet",
+    language: str = "python",
+    context: Optional[Dict] = None,
+    system_prompt: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+    temperature: float = 0.7
+) -> Dict[str, Any]:
+    """Generate code using specified model"""
+```
+
+### Code Validation
+```python
+@mcp.tool()
+def validate_code_quality(
+    code: str,
+    language: str = "python",
+    checks: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """Validate generated code quality"""
+```
+
+## Architecture Patterns
+
+### Model Management
+- Factory pattern for model selection
+- Strategy pattern for generation
+- Observer pattern for metrics
+- Decorator pattern for validation
+
+### Error Handling
+- Comprehensive error types
+- Graceful degradation
+- Detailed error messages
+- Recovery strategies
+
+### Metrics Collection
+- Generation time
+- Token usage
+- Success rates
+- Resource utilization
+
+## Development Guidelines
+
+### Code Style
+- PEP 8 compliance
+- Type hints required
+- Docstrings required
+- Comprehensive tests
+
+### Testing Strategy
+- Unit tests for core functions
+- Integration tests for workflows
+- Performance benchmarks
+- Security tests
+
+### Documentation
+- API documentation
+- Usage examples
+- Configuration guide
+- Troubleshooting guide
+
+## Future Considerations
+
+### Planned Enhancements
+- Additional model support
+- Language-specific validation
+- Performance optimization
+- Caching system
+- Distributed execution
+
+### Technical Debt
+- Token tracking for local models
+- Security scanning rules
+- Performance analysis patterns
+- Environment configuration
+- Test coverage

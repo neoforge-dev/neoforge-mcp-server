@@ -1,0 +1,55 @@
+version: "3.8"
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus-rules.yml:/etc/prometheus/prometheus-rules.yml
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.25.0
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/config.yml
+    ports:
+      - "9093:9093"
+    command:
+      - "--config.file=/etc/alertmanager/config.yml"
+      - "--storage.path=/alertmanager"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana-dashboard.json:/etc/grafana/provisioning/dashboards/mcp-dashboard.json
+      - ./monitoring/grafana-datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.88.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./monitoring/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4318:4318" # OTLP HTTP receiver
+      - "8888:8888" # Prometheus metrics exposed by the collector
+      - "8889:8889" # Prometheus exporter metrics
+    depends_on:
+      - prometheus
+    restart: unless-stopped

@@ -31,6 +31,17 @@ import cProfile
 import pstats
 import io
 import tempfile
+from debugger import create_debugger
+from decorators import set_debugger
+import sys
+import ast
+from langchain.chains.llm import LLMChain
+from langchain.prompts import PromptTemplate
+from langchain.llms import HuggingFaceLLM
+from langchain.llms import OpenAI
+from langchain.llms import Anthropic
+from langchain.pipelines.text_generation import pipeline
+import torch
 
 # Initialize the MCP server
 mcp = FastMCP("Terminal Command Runner MCP", port=7443, log_level="DEBUG")
@@ -2765,6 +2776,500 @@ def add_profiling_to_tools():
             mcp.tools[tool_name] = profiled_func
 
 add_profiling_to_tools()
+
+@mcp.tool()
+def generate_code(
+    prompt: str,
+    model: str = "claude-3-sonnet",
+    language: str = "python",
+    context: Optional[Dict[str, Any]] = None,
+    system_prompt: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+    temperature: float = 0.7,
+) -> Dict[str, Any]:
+    """
+    Generate code using specified LLM model with context awareness
+    
+    Args:
+        prompt: The code generation prompt
+        model: Model to use (claude-3-sonnet, gpt-4, code-llama, starcoder)
+        language: Target programming language
+        context: Additional context (codebase, dependencies, etc.)
+        system_prompt: Custom system prompt for the model
+        max_tokens: Maximum tokens for generation
+        temperature: Model temperature (0.0-1.0)
+    
+    Returns:
+        Dictionary with generated code and metadata
+    """
+    try:
+        # Validate inputs
+        if not prompt:
+            return {
+                'status': 'error',
+                'error': 'Prompt cannot be empty'
+            }
+            
+        if model not in ['claude-3-sonnet', 'gpt-4', 'code-llama', 'starcoder']:
+            return {
+                'status': 'error',
+                'error': f'Unsupported model: {model}'
+            }
+            
+        # Prepare context
+        generation_context = {
+            'language': language,
+            'model': model,
+            'timestamp': datetime.now().isoformat(),
+            'workspace_info': _get_workspace_info(),
+        }
+        
+        if context:
+            generation_context.update(context)
+            
+        # Prepare system prompt
+        if not system_prompt:
+            system_prompt = _get_default_system_prompt(language)
+            
+        # Track context length
+        context_info = manage_llm_context(
+            content=f"{system_prompt}\n{prompt}",
+            model=model,
+            max_tokens=max_tokens
+        )
+        
+        if context_info.get('status') == 'error':
+            return context_info
+            
+        # Generate code using appropriate model
+        if model in ['claude-3-sonnet', 'gpt-4']:
+            result = _generate_with_api_model(
+                prompt=prompt,
+                model=model,
+                system_prompt=system_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+        else:
+            result = _generate_with_local_model(
+                prompt=prompt,
+                model=model,
+                system_prompt=system_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+            
+        if result.get('status') == 'error':
+            return result
+            
+        # Validate generated code
+        validation = validate_code_quality(
+            code=result['code'],
+            language=language
+        )
+        
+        # Track metrics
+        _track_generation_metrics(
+            model=model,
+            language=language,
+            tokens_used=result.get('tokens_used', 0),
+            success=validation.get('status') == 'success'
+        )
+        
+        return {
+            'status': 'success',
+            'code': result['code'],
+            'language': language,
+            'model': model,
+            'context': generation_context,
+            'validation': validation,
+            'metrics': {
+                'tokens_used': result.get('tokens_used', 0),
+                'generation_time': result.get('generation_time', 0),
+            }
+        }
+        
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e),
+            'context': generation_context
+        }
+
+def _get_workspace_info() -> Dict[str, Any]:
+    """Get current workspace context"""
+    try:
+        workspace = WorkspaceManager.get_active_workspace()
+        return {
+            'workspace_id': workspace.id,
+            'tools': workspace.get_tools(),
+            'environment': workspace.get_environment(),
+            'dependencies': workspace.get_dependencies()
+        }
+    except Exception:
+        return {}
+
+def _get_default_system_prompt(language: str) -> str:
+    """Get default system prompt for code generation"""
+    return f"""You are an expert {language} developer. Generate clean, efficient, and well-documented code.
+Follow these principles:
+1. Write clear, maintainable code
+2. Include proper error handling
+3. Add comprehensive documentation
+4. Follow language best practices
+5. Consider performance implications
+"""
+
+def _track_generation_metrics(
+    model: str,
+    language: str,
+    tokens_used: int,
+    success: bool
+) -> None:
+    """Track code generation metrics"""
+    try:
+        metrics = {
+            'code_generation_requests': Counter(),
+            'tokens_used': Histogram(),
+            'generation_success': Counter(),
+        }
+        
+        metrics['code_generation_requests'].add(
+            1,
+            {'model': model, 'language': language}
+        )
+        
+        metrics['tokens_used'].record(
+            tokens_used,
+            {'model': model, 'language': language}
+        )
+        
+        if success:
+            metrics['generation_success'].add(
+                1,
+                {'model': model, 'language': language}
+            )
+    except Exception:
+        pass  # Fail silently for metrics
+
+def _generate_with_api_model(
+    prompt: str,
+    model: str,
+    system_prompt: str,
+    max_tokens: Optional[int],
+    temperature: float
+) -> Dict[str, Any]:
+    """Generate code using API-based models (Claude, GPT-4)"""
+    try:
+        start_time = time.time()
+        
+        if model == 'claude-3-sonnet':
+            # Claude API call
+            response = anthropic.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system=system_prompt,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            return {
+                'status': 'success',
+                'code': response.content,
+                'tokens_used': response.usage.total_tokens,
+                'generation_time': time.time() - start_time
+            }
+            
+        elif model == 'gpt-4':
+            # GPT-4 API call
+            response = openai.ChatCompletion.create(
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            
+            return {
+                'status': 'success',
+                'code': response.choices[0].message.content,
+                'tokens_used': response.usage.total_tokens,
+                'generation_time': time.time() - start_time
+            }
+            
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': f'API model error: {str(e)}'
+        }
+
+def _generate_with_local_model(
+    prompt: str,
+    model: str,
+    system_prompt: str,
+    max_tokens: Optional[int],
+    temperature: float
+) -> Dict[str, Any]:
+    """Generate code using local models (Code Llama, StarCoder)"""
+    try:
+        start_time = time.time()
+        
+        # Load model configuration
+        model_config = _get_local_model_config(model)
+        
+        # Initialize model pipeline
+        generator = pipeline(
+            "text-generation",
+            model=model_config['path'],
+            device=model_config['device']
+        )
+        
+        # Generate code
+        response = generator(
+            f"{system_prompt}\n{prompt}",
+            max_length=max_tokens or 1024,
+            temperature=temperature,
+            num_return_sequences=1
+        )
+        
+        return {
+            'status': 'success',
+            'code': response[0]['generated_text'],
+            'tokens_used': len(response[0]['generated_text'].split()),  # Approximate
+            'generation_time': time.time() - start_time
+        }
+        
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': f'Local model error: {str(e)}'
+        }
+
+def _get_local_model_config(model: str) -> Dict[str, Any]:
+    """Get configuration for local models"""
+    configs = {
+        'code-llama': {
+            'path': 'codellama/CodeLlama-34b-Python',
+            'device': 'cuda' if torch.cuda.is_available() else 'cpu'
+        },
+        'starcoder': {
+            'path': 'bigcode/starcoder',
+            'device': 'cuda' if torch.cuda.is_available() else 'cpu'
+        }
+    }
+    return configs[model]
+
+@mcp.tool()
+def validate_code_quality(
+    code: str,
+    language: str = "python",
+    checks: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Validate generated code quality
+    
+    Args:
+        code: Code to validate
+        language: Programming language
+        checks: Specific checks to run
+        
+    Returns:
+        Dictionary with validation results
+    """
+    try:
+        if not code:
+            return {
+                'status': 'error',
+                'error': 'No code provided'
+            }
+            
+        # Default checks if none specified
+        if not checks:
+            checks = ['syntax', 'style', 'complexity', 'security', 'performance']
+            
+        results = {}
+        
+        # Python-specific validation
+        if language.lower() == 'python':
+            # Syntax check
+            if 'syntax' in checks:
+                try:
+                    ast.parse(code)
+                    results['syntax'] = {'status': 'success'}
+                except SyntaxError as e:
+                    results['syntax'] = {
+                        'status': 'error',
+                        'error': str(e)
+                    }
+            
+            # Style check using ruff
+            if 'style' in checks:
+                style_result = lint_code(code=code)
+                results['style'] = style_result
+            
+            # Complexity check
+            if 'complexity' in checks:
+                complexity = _analyze_complexity(code)
+                results['complexity'] = complexity
+            
+            # Security check
+            if 'security' in checks:
+                security = _analyze_security(code)
+                results['security'] = security
+            
+            # Performance check
+            if 'performance' in checks:
+                performance = _analyze_performance(code)
+                results['performance'] = performance
+                
+        # Determine overall status
+        has_errors = any(
+            r.get('status') == 'error' 
+            for r in results.values()
+        )
+        
+        return {
+            'status': 'error' if has_errors else 'success',
+            'language': language,
+            'results': results,
+            'summary': _generate_validation_summary(results)
+        }
+        
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
+def _analyze_complexity(code: str) -> Dict[str, Any]:
+    """Analyze code complexity"""
+    try:
+        tree = ast.parse(code)
+        analyzer = McCabeComplexityAnalyzer()
+        complexity = analyzer.visit(tree)
+        
+        return {
+            'status': 'warning' if complexity > 10 else 'success',
+            'complexity_score': complexity,
+            'details': {
+                'threshold': 10,
+                'recommendation': 'Consider refactoring if complexity > 10'
+            }
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
+def _analyze_security(code: str) -> Dict[str, Any]:
+    """Analyze code security"""
+    try:
+        # Use bandit for security analysis
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py') as tmp:
+            tmp.write(code)
+            tmp.flush()
+            
+            result = subprocess.run(
+                ['bandit', '-r', tmp.name],
+                capture_output=True,
+                text=True
+            )
+            
+            return {
+                'status': 'error' if result.returncode == 1 else 'success',
+                'issues': _parse_bandit_output(result.stdout)
+            }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
+def _analyze_performance(code: str) -> Dict[str, Any]:
+    """Analyze code performance"""
+    try:
+        issues = []
+        tree = ast.parse(code)
+        analyzer = PerformanceAnalyzer()
+        analyzer.visit(tree)
+        
+        return {
+            'status': 'warning' if analyzer.issues else 'success',
+            'issues': analyzer.issues,
+            'recommendations': analyzer.recommendations
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
+def _generate_validation_summary(results: Dict[str, Any]) -> str:
+    """Generate human-readable validation summary"""
+    summary = []
+    
+    for check, result in results.items():
+        status = result.get('status', 'unknown')
+        if status == 'error':
+            summary.append(f"❌ {check}: {result.get('error', 'Unknown error')}")
+        elif status == 'warning':
+            summary.append(f"⚠️ {check}: Potential issues found")
+        else:
+            summary.append(f"✅ {check}: Passed")
+            
+    return '\n'.join(summary)
+
+class McCabeComplexityAnalyzer(ast.NodeVisitor):
+    """Analyze cyclomatic complexity"""
+    def __init__(self):
+        self.complexity = 0
+        
+    def visit_FunctionDef(self, node):
+        self.complexity += 1
+        self.generic_visit(node)
+        
+    def visit_If(self, node):
+        self.complexity += 1
+        self.generic_visit(node)
+        
+    def visit_While(self, node):
+        self.complexity += 1
+        self.generic_visit(node)
+        
+    def visit_For(self, node):
+        self.complexity += 1
+        self.generic_visit(node)
+        
+    def visit_Try(self, node):
+        self.complexity += 1
+        self.generic_visit(node)
+
+class PerformanceAnalyzer(ast.NodeVisitor):
+    """Analyze code for performance issues"""
+    def __init__(self):
+        self.issues = []
+        self.recommendations = []
+        
+    def visit_For(self, node):
+        # Check for list comprehension opportunities
+        if isinstance(node.target, ast.Name) and isinstance(node.body, list):
+            if len(node.body) == 1 and isinstance(node.body[0], ast.Assign):
+                self.recommendations.append(
+                    "Consider using list comprehension instead of for loop"
+                )
+        self.generic_visit(node)
+        
+    def visit_Call(self, node):
+        # Check for inefficient operations
+        if isinstance(node.func, ast.Attribute):
+            if node.func.attr == 'append':
+                self.recommendations.append(
+                    "Consider using extend() for adding multiple items"
+                )
+        self.generic_visit(node)
 
 if __name__ == "__main__":
     # Set up the server

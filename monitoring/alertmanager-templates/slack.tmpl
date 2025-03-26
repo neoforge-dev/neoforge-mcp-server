@@ -1,0 +1,30 @@
+{{ define "slack.default.title" }}
+[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}
+{{ end }}
+
+{{ define "slack.default.text" }}
+{{ if gt (len .Alerts.Firing) 0 }}
+*Alerts Firing:*
+{{ range .Alerts.Firing }}
+• {{ .Labels.severity | toUpper }}: {{ .Annotations.description }}
+  - Started: {{ .StartsAt | since }}
+  {{ if .Labels.tool }}- Tool: {{ .Labels.tool }}{{ end }}
+  - Value: {{ .Value }}
+{{ end }}
+{{ end }}
+
+{{ if gt (len .Alerts.Resolved) 0 }}
+*Alerts Resolved:*
+{{ range .Alerts.Resolved }}
+• {{ .Labels.severity | toUpper }}: {{ .Annotations.description }}
+  - Resolved: {{ .EndsAt | since }}
+  {{ if .Labels.tool }}- Tool: {{ .Labels.tool }}{{ end }}
+{{ end }}
+{{ end }}
+{{ end }}
+
+{{ define "slack.default.footer" }}
+{{ if .CommonLabels.job }}Job: {{ .CommonLabels.job }} | {{ end }}
+{{ if .CommonLabels.instance }}Instance: {{ .CommonLabels.instance }} | {{ end }}
+Managed by AlertManager
+{{ end }} 

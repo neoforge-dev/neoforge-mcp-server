@@ -1,0 +1,106 @@
+groups:
+  - name: mcp_alerts
+    rules:
+      # System Resource Alerts
+      - alert: HighCPUUsage
+        expr: mcp_system_cpu_usage > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High CPU usage detected
+          description: CPU usage is above 80% for more than 5 minutes
+
+      - alert: HighMemoryUsage
+        expr: mcp_system_memory_usage > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High memory usage detected
+          description: Memory usage is above 85% for more than 5 minutes
+
+      - alert: HighDiskUsage
+        expr: mcp_system_disk_usage > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: High disk usage detected
+          description: Disk usage is above 90% for more than 10 minutes
+
+      # Tool Execution Alerts
+      - alert: HighToolErrorRate
+        expr: rate(mcp_tool_error_count[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High tool error rate detected
+          description: Tool error rate is above 10% in the last 5 minutes
+
+      - alert: SlowToolExecution
+        expr: histogram_quantile(0.95, sum(rate(mcp_tool_execution_time_bucket[5m])) by (tool, le)) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Slow tool execution detected
+          description: 95th percentile of tool execution time is above 1 second
+
+      - alert: HighToolExecutionRate
+        expr: sum(rate(mcp_tool_execution_count[1m])) by (tool) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High tool execution rate detected
+          description: Tool is being executed more than 100 times per minute
+
+      # Process Alerts
+      - alert: LowProcessCount
+        expr: mcp_system_process_count < 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: No MCP processes running
+          description: No MCP processes are currently running
+
+      - alert: HighProcessCount
+        expr: mcp_system_process_count > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High number of MCP processes
+          description: More than 10 MCP processes are running
+
+      # Resource Exhaustion Predictions
+      - alert: MemoryExhaustionPrediction
+        expr: predict_linear(mcp_system_memory_usage[1h], 3600) > 95
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Memory exhaustion predicted
+          description: Memory usage is predicted to exceed 95% within the next hour
+
+      - alert: DiskExhaustionPrediction
+        expr: predict_linear(mcp_system_disk_usage[6h], 21600) > 95
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Disk exhaustion predicted
+          description: Disk usage is predicted to exceed 95% within the next 6 hours
+
+      # Service Health
+      - alert: HighErrorRateByTool
+        expr: sum(rate(mcp_tool_error_count[5m])) by (tool) / sum(rate(mcp_tool_execution_count[5m])) by (tool) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High error rate for specific tool
+          description: Error rate is above 5% for {{ $labels.tool }}
