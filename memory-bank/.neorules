@@ -1,5 +1,23 @@
 # Terminal Command Runner MCP - Project Rules and Patterns
 
+## Dependency Management
+
+- ALWAYS use `uv add` for installing Python packages
+- NEVER use pip or requirements.txt
+- ALL dependencies must be specified in pyproject.toml
+- When suggesting dependency changes:
+  1. Use `uv add [package]` for installation
+  2. Update pyproject.toml as needed
+  3. Document the change in active-context.md
+
+## Code Quality
+
+- Use ruff as the ONLY linting and formatting tool
+- NEVER suggest using flake8, isort, or other linting tools
+- All code quality configurations go in pyproject.toml
+- Run ruff format before committing changes
+- Run ruff lint to check for issues
+
 ## Testing Patterns
 
 - Use pytest for all unit and integration tests
@@ -9,14 +27,40 @@
 - Separate unit tests from integration tests
 - Use temporary directories and files for file operation tests
 - For command execution, use safe commands like `echo`, `cat`, etc.
+- Use Docker for isolated testing environments
+- Use Makefile commands for standardized test execution
+- Always run tests in parallel with pytest-xdist when possible
+- Collect coverage data for all test runs
+- Mark tests with appropriate markers (unit, integration)
+
+## Code Analysis
+
+- Run static analysis before committing changes:
+  1. Use `analyze_codebase` with type="all"
+  2. Address any security issues immediately
+  3. Review complexity hotspots
+  4. Document dependencies in tech-context.md
+
+- Monitor system performance during development:
+  1. Use `monitor_performance` for resource-intensive operations
+  2. Track baseline metrics
+  3. Document performance regressions
+
+- Manage LLM context effectively:
+  1. Use `manage_llm_context` for large outputs
+  2. Follow optimization suggestions
+  3. Keep content within model limits
+  4. Prioritize code blocks and error messages
 
 ## Code Style
 
-- Follow PEP 8 for Python code style
+- Follow ruff's style guide (which includes PEP 8)
 - Use type hints for function parameters and return values
 - Document functions with docstrings (Google style)
 - Keep functions focused on a single responsibility
 - Use meaningful variable and function names
+- Keep cyclomatic complexity below 15
+- Address complexity hotspots proactively
 
 ## Project Organization
 
@@ -24,17 +68,41 @@
 - Place tests in a separate tests/ directory
 - Use conftest.py for shared pytest fixtures
 - Keep test data in tests/data/ directory
+- Maintain pyproject.toml for all project configuration
+- Document all new tools in tech-context.md
 
 ## Development Workflow
 
-- Run tests before committing changes
-- Use virtual environment for dependency isolation
-- Document changes in progress.md
-- Update active-context.md when shifting focus
+- Run tests before committing changes:
+  1. Use `enhanced_testing` with parallel execution
+  2. Review coverage reports
+  3. Address any test failures
 
-## Common Test Commands
+- Monitor system resources:
+  1. Use `monitor_performance` during development
+  2. Track resource usage trends
+  3. Optimize resource-intensive operations
 
-- Run all tests: `pytest`
-- Run specific test file: `pytest tests/test_file.py`
-- Run with coverage: `pytest --cov=.`
-- Run with verbose output: `pytest -v` 
+- Manage code quality:
+  1. Run static analysis regularly
+  2. Address security issues immediately
+  3. Review complexity metrics
+  4. Keep dependencies up to date
+
+- Track LLM context:
+  1. Monitor token usage
+  2. Optimize large outputs
+  3. Follow context management suggestions
+
+## Common Commands
+
+- Install dependency: `uv add [package]`
+- Format code: `ruff format .`
+- Lint code: `ruff check .`
+- Run all tests: `enhanced_testing(test_type="all", parallel=True)`
+- Run specific test: `enhanced_testing(test_type="unit", parallel=True)`
+- Run with coverage: `enhanced_testing(coverage=True)`
+- Analyze code: `analyze_codebase(analysis_type="all")`
+- Monitor performance: `monitor_performance(duration=60)`
+- Manage context: `manage_llm_context(content, model="claude-3-sonnet")`
+- Format output: Use filter_output tool for long outputs 

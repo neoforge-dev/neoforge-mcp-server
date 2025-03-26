@@ -4,17 +4,35 @@
 
 - **Python**: Core implementation language (3.8+)
 - **FastMCP**: Framework for creating MCP servers (based on FastAPI)
+- **psutil**: System and process monitoring
+- **pytest**: Testing framework with parallel execution
 - **Subprocess**: Standard library for process execution
 - **Threading**: For concurrent execution and output streaming
 - **Queue**: Thread-safe data structures for output collection
 - **Signal**: For process control and termination
 - **OS**: Operating system interfaces for file and process operations
 
-## Development Setup
+## Development Setup & Conventions
 
-- Python 3.8+ environment
-- Virtual environment for dependency isolation
-- Development tooling for testing and debugging
+### Package Management
+- **uv**: Primary package manager for Python dependencies
+  - All dependencies must be installed using `uv add`
+  - Direct pip usage is not allowed
+  - Requirements are managed through `pyproject.toml`, not requirements.txt
+
+### Code Quality
+- **ruff**: Single tool for all code quality checks
+  - Replaces flake8, isort, and other linting tools
+  - Handles both linting and formatting
+  - Configuration in pyproject.toml
+
+### Testing
+- **pytest**: Primary testing framework
+  - Parallel test execution with pytest-xdist
+  - Coverage reporting with pytest-cov
+  - Test categorization (unit, integration)
+- **Docker**: For isolated testing environments
+- **Makefile**: For standardized test commands
 
 ## Technical Constraints
 
@@ -23,12 +41,22 @@
 - **Timeouts**: All operations should have configurable timeouts
 - **Error Handling**: All operations must have robust error handling
 - **Cross-Platform**: Core functionality should work across operating systems
+- **Context Management**: Must track and manage LLM context length
 
 ## Dependencies
 
+### Core Dependencies
 - **FastMCP**: For the MCP server implementation
+- **psutil**: System monitoring and metrics
+- **pytest**: Testing framework with plugins
+  - pytest-xdist: Parallel test execution
+  - pytest-cov: Coverage reporting
 - **Standard Library**: Core functionality relies only on Python standard library
-- **Operating System**: Access to OS-level process and file operations
+
+### Development Tools
+- **uv**: Modern Python package manager
+- **ruff**: All-in-one Python linter and formatter
+- **pytest**: Testing framework with plugins
 
 ## API Structure
 
@@ -57,13 +85,30 @@ The API consists of tool functions that can be invoked remotely:
    - `search_files`: Find files matching a pattern
    - `get_file_info`: Get metadata about a file
 
-5. **Utilities**:
+5. **Development Tools**:
+   - `install_dependency`: Install Python packages using uv
+   - `run_tests`: Execute tests with proper isolation
+   - `format_code`: Run ruff formatting
+   - `lint_code`: Run ruff linting
+   - `filter_output`: Process and format long command outputs
+
+6. **Code Analysis**:
+   - `analyze_codebase`: Static code analysis
+   - `monitor_performance`: System performance tracking
+   - `manage_llm_context`: LLM context optimization
+   - `enhanced_testing`: Advanced test execution
+
+7. **Utilities**:
    - `system_info`: Get system information
    - `calculate`: Evaluate a mathematical expression
+   - `context_length`: Track LLM context usage
 
 ## Performance Considerations
 
 - **Output Streaming**: Efficient handling of process output
 - **Resource Management**: Proper cleanup of resources for long-running processes
 - **Memory Usage**: Careful handling of large file content or command output
-- **Threading**: Proper synchronization for concurrent operations 
+- **Threading**: Proper synchronization for concurrent operations
+- **Context Length**: Monitoring and managing LLM context usage
+- **Test Performance**: Parallel test execution and efficient coverage tracking
+- **System Monitoring**: Low-overhead performance metrics collection 

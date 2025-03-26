@@ -1,71 +1,72 @@
-# Terminal Command Runner MCP - Active Context
+# Active Development Context
 
 ## Current Focus
-
-We have successfully implemented and tested the functions required for the Terminal Command Runner MCP. Our implementation includes:
-
-1. **File Operations**:
-   - `read_file`: Read file contents with size limits - TESTED & WORKING
-   - `write_file`: Write content to a file - TESTED & WORKING
-   - `create_directory`: Create new directories - TESTED & WORKING
-   - `list_directory`: List directory contents - TESTED & WORKING
-   - `move_file`: Move or rename files - TESTED & WORKING
-   - `search_files`: Find files matching patterns - TESTED & WORKING
-   - `get_file_info`: Get metadata about files - TESTED & WORKING
-
-2. **Process Management**:
-   - `list_sessions`: List active command sessions - TESTED & WORKING
-   - `list_processes`: List system processes - TESTED & WORKING
-   - `kill_process`: Terminate processes by PID - TESTED & WORKING
-   - `execute_command`: Run commands with timeout - TESTED & WORKING
-   - `read_output`: Get output from running processes - TESTED & WORKING
-   - `force_terminate`: Stop running processes - TESTED & WORKING
-
-3. **Command Control**:
-   - `block_command`: Add commands to the blacklist - TESTED & WORKING
-   - `unblock_command`: Remove commands from the blacklist - TESTED & WORKING
-
-4. **Utilities**:
-   - `system_info`: Get detailed system information - TESTED & WORKING
-   - `calculate`: Evaluate mathematical expressions - TESTED & WORKING
-   - `edit_block`: Apply edits to files - TESTED & WORKING
+- Implementing advanced MCP tools for development workflow optimization
+- Enhancing code analysis and performance monitoring capabilities
+- Improving LLM context management and testing infrastructure
 
 ## Recent Changes
+1. Added new MCP tools:
+   - `analyze_codebase`: Advanced static analysis
+   - `monitor_performance`: System metrics tracking
+   - `manage_llm_context`: LLM context optimization
+   - `enhanced_testing`: Improved test execution
 
-- Implemented all missing functions required by the test suite
-- Created manual test scripts to verify functionality
-- Successfully tested file operations and system utilities
-- Fixed server startup issue in test environment
-- Thoroughly documented the implementation process
+2. Enhanced existing tools:
+   - Improved dependency management with `uv`
+   - Added code quality checks with `ruff`
+   - Implemented smart output filtering
+   - Added performance monitoring
 
-## Next Steps
-
-1. **Test Environment**:
-   - Fix the pytest integration issues
-   - Create a more robust test environment
-   - Configure proper test isolation
-
-2. **Documentation**:
-   - Document the API more thoroughly
-   - Create usage examples for each function
-   - Update the README with improved instructions
-
-3. **CI/CD Pipeline**:
-   - Configure GitHub Actions for automated testing
-   - Add test coverage reporting
-   - Implement linting and code quality checks
+3. Updated documentation:
+   - Enhanced tech-context.md with new tools
+   - Updated .neorules with new patterns
+   - Added comprehensive testing guidelines
 
 ## Active Decisions
+1. Code Analysis:
+   - Using static analysis for security and complexity
+   - Implementing cyclomatic complexity tracking
+   - Monitoring performance metrics
 
-- **Test Strategy**: Using manual tests to validate functionality due to pytest environment issues
-- **Function Structure**: Standardized function structure with proper error handling
-- **Return Format**: All functions return dictionaries with consistent keys
-- **Security Measures**: Added checks to prevent dangerous operations
-- **Platform Compatibility**: Functions work across Windows, Linux, and macOS
+2. Testing Strategy:
+   - Parallel test execution with pytest-xdist
+   - Coverage tracking with pytest-cov
+   - Test categorization (unit/integration)
 
-## Current Considerations
+3. LLM Integration:
+   - Smart context management
+   - Token usage optimization
+   - Priority-based content filtering
 
-- How to improve the test environment to support automated testing
-- How to better handle platform-specific behavior in a way that tests can validate
-- How to ensure tests are properly isolated and don't interfere with each other
-- How to maintain compatibility across different Python versions 
+## Next Steps
+1. Infrastructure Enhancement:
+   - Add distributed tracing support
+   - Implement metrics collection pipeline
+   - Add profiling tools
+
+2. Developer Experience:
+   - Create CLI interface for MCP tools
+   - Add interactive debugging features
+   - Implement workspace management
+
+3. Testing Infrastructure:
+   - Add load testing capabilities
+   - Implement mutation testing
+   - Add property-based testing
+
+## Known Issues
+1. Performance:
+   - Need to optimize large file operations
+   - Improve concurrent process handling
+   - Enhance memory management for large outputs
+
+2. Testing:
+   - Need more comprehensive integration tests
+   - Coverage gaps in edge cases
+   - Test isolation improvements needed
+
+3. Documentation:
+   - Need API examples for new tools
+   - Missing performance benchmarks
+   - Need more detailed setup guides 

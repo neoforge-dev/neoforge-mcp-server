@@ -1,68 +1,217 @@
-# Terminal Command Runner MCP - System Patterns
+# System Architecture and Design Patterns
 
-## Architecture Overview
+## Core Architecture
 
-The Terminal Command Runner MCP follows a tool-based architecture pattern:
+### MCP Server
+- FastMCP-based server implementation
+- RESTful API design with tool-based interface
+- Asynchronous command execution
+- Event-driven output streaming
+- Thread-safe process management
 
+### Component Structure
 ```
-Client <---> MCP Server <---> System Resources
-              |
-              v
-          Tool Registry
-              |
-              v
-        Command Execution / File System / Process Management
+server.py
+├── Core Tools
+│   ├── Command Execution
+│   ├── Process Management
+│   └── File Operations
+├── Development Tools
+│   ├── Code Analysis
+│   ├── Performance Monitoring
+│   └── Testing Support
+└── Utility Tools
+    ├── System Info
+    ├── Calculations
+    └── Context Management
 ```
-
-## Key Components
-
-1. **FastMCP Server**: Base server implementation that handles client connections and tool registration
-2. **Tool Registry**: Collection of functions registered as API endpoints that can be invoked remotely
-3. **Command Executor**: Handles command execution with appropriate security checks and process management
-4. **File System Interface**: Provides access to filesystem operations with security guardrails
-5. **Process Manager**: Tracks and manages long-running processes with output streaming
 
 ## Design Patterns
 
 ### Command Pattern
-- Commands are encapsulated as tool functions
-- Each tool provides a specific capability with defined parameters
-- Commands execute with isolated scope and return standardized results
-
-### Producer-Consumer Pattern
-- Command output is streamed through queues
-- Reader threads produce output from process pipes
-- API consumers read from these queues on demand
-
-### Singleton Pattern
-- Single MCP server instance manages all connections
-- Global state for active sessions and output queues
+- Each tool is implemented as a discrete command
+- Standardized input/output interface
+- Error handling and validation
+- Resource cleanup
 
 ### Observer Pattern
-- Clients can observe long-running processes through the read_output tool
-- Events are streamed as they occur rather than blocking for completion
+- Process output streaming
+- Performance metrics collection
+- Event-based notifications
 
-## Technical Decisions
+### Factory Pattern
+- Tool registration and instantiation
+- Dynamic command creation
+- Plugin system support
 
-### Process Execution
-- Uses subprocess.Popen for non-blocking execution
-- Dedicated reader threads for stdout and stderr
-- Timeout control for long-running processes
+### Strategy Pattern
+- Configurable execution strategies
+- Platform-specific implementations
+- Test environment isolation
 
-### Security Approach
-- Command blacklist to prevent dangerous operations
-- Configurable execution timeout
-- Path validation for file operations
+## Security Patterns
+
+### Command Validation
+- Blacklist-based command filtering
+- Path traversal prevention
+- Resource limit enforcement
+
+### Process Isolation
+- Separate process spaces
+- Timeout enforcement
+- Resource cleanup
+
+### Error Handling
+- Comprehensive error capture
+- Structured error responses
+- Graceful degradation
+
+## Performance Patterns
+
+### Resource Management
+- Thread pool management
+- Process lifecycle control
+- Memory usage optimization
 
 ### Output Handling
-- Output streaming through thread-safe queues
-- Non-blocking reads from process output
-- Support for both synchronous and asynchronous execution patterns
+- Streaming large outputs
+- Buffer management
+- Smart truncation
 
-## Component Relationships
+### Caching
+- Command result caching
+- File content caching
+- System info caching
 
-- **MCP Server** provides registration for all tool functions
-- **Tools** encapsulate discrete capabilities and security checks
-- **Command Execution** manages process lifecycle and output collection
-- **Process Management** tracks active processes and enables interaction with them
-- **File System Tools** provide controlled access to file operations 
+## Testing Patterns
+
+### Test Categories
+- Unit tests for core functionality
+- Integration tests for tool interaction
+- System tests for end-to-end validation
+
+### Test Isolation
+- Docker-based test environments
+- Mock system operations
+- Resource cleanup
+
+### Performance Testing
+- Load testing framework
+- Resource usage monitoring
+- Benchmark suite
+
+## Development Patterns
+
+### Code Organization
+- Modular tool implementation
+- Clear separation of concerns
+- Consistent file structure
+
+### Error Handling
+```python
+try:
+    # Operation-specific logic
+    result = perform_operation()
+    return {
+        'status': 'success',
+        'result': result
+    }
+except SpecificError as e:
+    return {
+        'status': 'error',
+        'error': str(e),
+        'type': 'specific_error'
+    }
+except Exception as e:
+    return {
+        'status': 'error',
+        'error': str(e),
+        'type': 'general_error'
+    }
+```
+
+### Function Structure
+```python
+@mcp.tool()
+def tool_name(param1: Type1, param2: Type2 = default) -> Dict[str, Any]:
+    """
+    Tool description
+    
+    Args:
+        param1: Description
+        param2: Description
+    
+    Returns:
+        Dictionary with operation result
+    """
+    try:
+        # Validation
+        if not validate_params(param1, param2):
+            return {'status': 'error', 'error': 'Invalid parameters'}
+            
+        # Core logic
+        result = process_operation(param1, param2)
+        
+        # Result formatting
+        return {
+            'status': 'success',
+            'result': result
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+```
+
+## Integration Patterns
+
+### Tool Communication
+- Standardized result format
+- Error propagation
+- Context sharing
+
+### Resource Sharing
+- Thread-safe queues
+- Shared state management
+- Resource pools
+
+### Event Handling
+- Process lifecycle events
+- Error events
+- Status updates
+
+## Monitoring Patterns
+
+### Performance Metrics
+- CPU usage tracking
+- Memory utilization
+- I/O operations
+- Network traffic
+
+### Error Tracking
+- Error categorization
+- Stack trace collection
+- Error rate monitoring
+
+### Health Checks
+- Service availability
+- Resource utilization
+- System status
+
+## Documentation Patterns
+
+### Code Documentation
+- Google-style docstrings
+- Type hints
+- Usage examples
+
+### API Documentation
+- OpenAPI/Swagger specs
+- Example requests/responses
+- Error scenarios
+
+### System Documentation
+- Architecture overview
+- Component interaction
+- Deployment guides 
