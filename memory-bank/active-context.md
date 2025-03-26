@@ -7,6 +7,7 @@
 - Implementing metrics collection system
 - Adding profiling tools
 - Enhancing error tracking and reporting
+- Implementing monitoring dashboards
 
 ## Recent Changes
 1. Added new MCP tools:
@@ -32,6 +33,12 @@
    - Service name and version tracking
    - Error and exception tracking in spans
 
+5. Added OpenTelemetry metrics integration
+   - Tool execution metrics (duration, calls, errors)
+   - System resource monitoring (memory usage)
+   - Configurable metrics collection endpoint
+   - Automatic metrics for all tools
+
 ## Active Decisions
 1. Code Analysis:
    - Using static analysis for security and complexity
@@ -49,14 +56,18 @@
    - Priority-based content filtering
 
 4. Using OpenTelemetry as the primary observability framework
-5. OTLP protocol for trace export
-6. Automatic tool wrapping for consistent tracing
+5. OTLP protocol for trace and metrics export
+6. Automatic tool wrapping for consistent tracing and metrics
+7. System resource monitoring with psutil
 
 ## Next Steps
 1. Infrastructure Enhancement:
    - Add distributed tracing support
    - Implement metrics collection pipeline
    - Add profiling tools
+   - Set up monitoring dashboards
+   - Configure alerting system
+   - Enhance error tracking
 
 2. Developer Experience:
    - Create CLI interface for MCP tools
@@ -86,4 +97,6 @@
 
 4. Need to implement metrics collection
 5. Profiling tools not yet integrated
-6. Error tracking needs enhancement 
+6. Error tracking needs enhancement
+7. Need monitoring dashboards
+8. Need alerting system 

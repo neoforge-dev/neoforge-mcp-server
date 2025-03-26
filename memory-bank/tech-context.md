@@ -127,4 +127,21 @@ The API consists of tool functions that can be invoked remotely:
   - opentelemetry-api==1.31.1
   - opentelemetry-sdk==1.31.1
   - opentelemetry-exporter-otlp==1.31.1
-  - opentelemetry-semantic-conventions==0.52b1 
+  - opentelemetry-semantic-conventions==0.52b1
+
+### Metrics Collection
+- OpenTelemetry Metrics integration
+- OTLP exporter for metrics collection
+- Default endpoint: http://localhost:4317
+- Key metrics:
+  - Tool execution duration (histogram)
+  - Tool call count (counter)
+  - Error count (counter)
+  - Active sessions (up/down counter)
+  - Memory usage (observable gauge)
+
+### System Dependencies
+- psutil for system metrics collection
+- OpenTelemetry metrics packages:
+  - opentelemetry-sdk-metrics
+  - opentelemetry-exporter-otlp-proto-grpc 

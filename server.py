@@ -23,6 +23,10 @@ from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.semconv.resource import ResourceAttributes
 from functools import wraps
+from opentelemetry.metrics import get_meter_provider, set_meter_provider
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 
 # Initialize the MCP server
 mcp = FastMCP("Terminal Command Runner MCP", port=7443, log_level="DEBUG")
@@ -51,6 +55,47 @@ otlp_exporter = OTLPSpanExporter(endpoint="http://localhost:4317")
 span_processor = BatchSpanProcessor(otlp_exporter)
 trace.get_tracer_provider().add_span_processor(span_processor)
 
+# Initialize metrics
+meter_provider = MeterProvider(
+    metric_readers=[PeriodicExportingMetricReader(
+        OTLPMetricExporter(endpoint="http://localhost:4317")
+    )]
+)
+set_meter_provider(meter_provider)
+meter = get_meter_provider().get_meter("mcp-server")
+
+# Create metrics
+tool_duration = meter.create_histogram(
+    name="mcp.tool.duration",
+    description="Duration of MCP tool execution",
+    unit="s"
+)
+
+tool_calls = meter.create_counter(
+    name="mcp.tool.calls",
+    description="Number of MCP tool calls",
+    unit="1"
+)
+
+tool_errors = meter.create_counter(
+    name="mcp.tool.errors",
+    description="Number of MCP tool errors",
+    unit="1"
+)
+
+active_sessions = meter.create_up_down_counter(
+    name="mcp.sessions.active",
+    description="Number of active MCP sessions",
+    unit="1"
+)
+
+memory_usage = meter.create_observable_gauge(
+    name="mcp.system.memory_usage",
+    description="Memory usage of the MCP server",
+    unit="bytes",
+    callbacks=[lambda _: psutil.Process().memory_info().rss]
+)
+
 def trace_tool(func):
     """Decorator to add tracing to MCP tools"""
     @wraps(func)
@@ -74,6 +119,23 @@ def trace_tool(func):
                 span.set_attribute("mcp.tool.error", str(e))
                 span.record_exception(e)
                 raise
+    return wrapper
+
+def metrics_tool(func):
+    """Decorator to add metrics to MCP tools"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        tool_calls.add(1, {"tool": func.__name__})
+        
+        try:
+            result = func(*args, **kwargs)
+            duration = time.time() - start_time
+            tool_duration.record(duration, {"tool": func.__name__})
+            return result
+        except Exception as e:
+            tool_errors.add(1, {"tool": func.__name__, "error": str(e)})
+            raise
     return wrapper
 
 # Add tracing to existing tools
@@ -166,8 +228,130 @@ def configure_tracing(exporter_endpoint: str = None, service_name: str = None, s
             'error': str(e)
         }
 
-# Add tracing to all tools
-add_tracing_to_tools()
+@mcp.tool()
+def get_metrics_info() -> Dict[str, Any]:
+    """
+    Get information about the current metrics configuration
+    
+    Returns:
+        Dictionary with metrics information
+    """
+    try:
+        return {
+            'status': 'success',
+            'meter': {
+                'name': meter.name,
+                'version': meter_provider.__class__.__name__
+            },
+            'metrics': {
+                'tool_duration': {
+                    'name': tool_duration.name,
+                    'description': tool_duration.description,
+                    'unit': tool_duration.unit
+                },
+                'tool_calls': {
+                    'name': tool_calls.name,
+                    'description': tool_calls.description,
+                    'unit': tool_calls.unit
+                },
+                'tool_errors': {
+                    'name': tool_errors.name,
+                    'description': tool_errors.description,
+                    'unit': tool_errors.unit
+                },
+                'active_sessions': {
+                    'name': active_sessions.name,
+                    'description': active_sessions.description,
+                    'unit': active_sessions.unit
+                },
+                'memory_usage': {
+                    'name': memory_usage.name,
+                    'description': memory_usage.description,
+                    'unit': memory_usage.unit
+                }
+            }
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
+@mcp.tool()
+def configure_metrics(exporter_endpoint: str = None) -> Dict[str, Any]:
+    """
+    Configure metrics settings
+    
+    Args:
+        exporter_endpoint: OTLP exporter endpoint URL
+    
+    Returns:
+        Dictionary with configuration result
+    """
+    try:
+        global meter_provider, meter
+        
+        if exporter_endpoint:
+            # Create new meter provider with updated endpoint
+            meter_provider = MeterProvider(
+                metric_readers=[PeriodicExportingMetricReader(
+                    OTLPMetricExporter(endpoint=exporter_endpoint)
+                )]
+            )
+            set_meter_provider(meter_provider)
+            meter = get_meter_provider().get_meter("mcp-server")
+            
+            # Recreate metrics with new meter
+            global tool_duration, tool_calls, tool_errors, active_sessions, memory_usage
+            tool_duration = meter.create_histogram(
+                name="mcp.tool.duration",
+                description="Duration of MCP tool execution",
+                unit="s"
+            )
+            tool_calls = meter.create_counter(
+                name="mcp.tool.calls",
+                description="Number of MCP tool calls",
+                unit="1"
+            )
+            tool_errors = meter.create_counter(
+                name="mcp.tool.errors",
+                description="Number of MCP tool errors",
+                unit="1"
+            )
+            active_sessions = meter.create_up_down_counter(
+                name="mcp.sessions.active",
+                description="Number of active MCP sessions",
+                unit="1"
+            )
+            memory_usage = meter.create_observable_gauge(
+                name="mcp.system.memory_usage",
+                description="Memory usage of the MCP server",
+                unit="bytes",
+                callbacks=[lambda _: psutil.Process().memory_info().rss]
+            )
+        
+        return {
+            'status': 'success',
+            'config': {
+                'exporter_endpoint': exporter_endpoint or "http://localhost:4317"
+            }
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
+# Add metrics to all tools
+def add_metrics_to_tools():
+    """Add metrics to all registered MCP tools"""
+    for tool_name, tool_func in mcp.tools.items():
+        if not hasattr(tool_func, "_metrics"):
+            metriced_func = metrics_tool(tool_func)
+            metriced_func._metrics = True
+            mcp.tools[tool_name] = metriced_func
+
+add_metrics_to_tools()
 
 def is_command_safe(cmd: str) -> bool:
     """Check if a command is safe to execute"""

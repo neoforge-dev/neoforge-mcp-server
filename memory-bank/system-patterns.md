@@ -245,4 +245,33 @@ def tool_name(param1: Type1, param2: Type2 = default) -> Dict[str, Any]:
    - Exception capture in spans
    - Error attribute propagation
    - Status code tracking
-   - Automatic error context collection 
+   - Automatic error context collection
+
+### Metrics Architecture
+1. **Metrics Collection**
+   - OpenTelemetry SDK for metrics generation
+   - OTLP exporter for metrics export
+   - Configurable collection endpoint
+   - Periodic metric export
+
+2. **Tool Metrics**
+   - Decorator pattern for automatic metrics collection
+   - Standard metric types:
+     - Histograms for durations
+     - Counters for calls and errors
+     - Up/down counters for active sessions
+     - Observable gauges for system metrics
+   - Consistent naming convention: `mcp.tool.*`
+   - Automatic error tracking
+
+3. **System Metrics**
+   - Memory usage monitoring via psutil
+   - Observable gauge implementation
+   - Real-time resource tracking
+   - Low-overhead collection
+
+4. **Metric Configuration**
+   - Dynamic endpoint configuration
+   - Metric recreation on config changes
+   - Global meter provider management
+   - Metric reader configuration 
