@@ -11,6 +11,10 @@
 - pytest for testing
 - cmd for debugging interface
 - JSON for configuration storage
+- Anthropic API for code generation
+- OpenAI API for code generation
+- Transformers for local models
+- cProfile for profiling
 
 ### Monitoring Stack
 - OpenTelemetry SDK for metrics collection
@@ -19,6 +23,9 @@
 - Grafana for visualization
 - Docker Compose for deployment
 - psutil for system metrics
+- Model performance tracking
+- Profiling data collection
+- Validation metrics
 
 ### Debugging Stack
 - cmd module for CLI interface
@@ -27,6 +34,9 @@
 - pdb for debugging support
 - threading for synchronization
 - functools for decorators
+- Model debugging tools
+- Profiling analysis
+- Validation debugging
 
 ### Development Tools
 - Black for code formatting
@@ -34,6 +44,10 @@
 - mypy for type checking
 - pytest for testing
 - coverage.py for code coverage
+- Bandit for security scanning
+- Ruff for style checking
+- cProfile for profiling
+- Model development tools
 
 ## Workspace Management
 - WorkspaceConfig dataclass for configuration
@@ -45,6 +59,9 @@
 - Path management
 - Settings management
 - Rich console output
+- Model workspace management
+- Profiling workspace management
+- Validation workspace management
 
 ## Development Setup
 
@@ -53,12 +70,16 @@
 2. pip package manager
 3. virtualenv or similar virtual environment tool
 4. Docker and Docker Compose
+5. CUDA support (optional, for local models)
+6. 16GB+ RAM (recommended for local models)
 
 ### Installation
 1. Create and activate virtual environment
 2. Install dependencies: `pip install -r requirements.txt`
 3. Install development dependencies: `pip install -r requirements-dev.txt`
 4. Start monitoring stack: `docker-compose up -d`
+5. Set up API keys for code generation models
+6. Configure local model paths
 
 ### Running the Server
 1. Start the server: `python server.py [--debug]`
@@ -66,6 +87,7 @@
 3. Access Grafana at `http://localhost:3000`
 4. Access Prometheus at `http://localhost:9090`
 5. Access AlertManager at `http://localhost:9093`
+6. Access profiling dashboard at `http://localhost:7443/profiling`
 
 ### Using the CLI
 1. Run CLI commands: `python cli.py [command] [options] [--debug]`
@@ -75,6 +97,9 @@
    - `system`: System operations
    - `dev`: Development tools
    - `debug`: Debugging tools
+   - `generate`: Code generation tools
+   - `validate`: Code validation tools
+   - `profile`: Profiling tools
 
 ### Debugging Tools
 1. Start debugger: Add `--debug` flag
@@ -88,6 +113,9 @@
    - `continue`: Resume execution
    - `locals`: Show variables
    - `stack`: Show call stack
+   - `model`: Model debugging
+   - `profile`: Profiling analysis
+   - `validate`: Validation debugging
 
 ## Workspace Commands
 ```bash
@@ -126,6 +154,15 @@ mcp workspace settings update <key> <value>
 
 # Show workspace info
 mcp workspace info
+
+# Configure model settings
+mcp workspace model config <model> <key> <value>
+
+# Set up profiling
+mcp workspace profile setup <options>
+
+# Configure validation
+mcp workspace validate config <options>
 ```
 
 ## Debugging Commands
@@ -159,6 +196,15 @@ debug stack
 
 # Quit debugger
 debug quit
+
+# Model debugging
+debug model <command> [options]
+
+# Profiling analysis
+debug profile <command> [options]
+
+# Validation debugging
+debug validate <command> [options]
 ```
 
 ## Technical Constraints
@@ -173,6 +219,9 @@ debug quit
 - Workspace switching overhead
 - Configuration persistence latency
 - Tool isolation impact
+- Model inference time limits
+- Profiling data size limits
+- Validation performance impact
 
 ### Security
 - Input validation
@@ -184,6 +233,9 @@ debug quit
 - Workspace isolation
 - Tool access control
 - Environment separation
+- Model access control
+- Profiling data security
+- Validation security
 
 ### Scalability
 - Concurrent command execution
@@ -195,6 +247,9 @@ debug quit
 - Workspace state consistency
 - Tool availability
 - Configuration persistence
+- Model scaling
+- Profiling data scaling
+- Validation scaling
 
 ## Dependencies
 
@@ -206,6 +261,11 @@ debug quit
 - requests: HTTP client
 - psutil: System monitoring
 - OpenTelemetry: Observability
+- anthropic: Claude API
+- openai: OpenAI API
+- transformers: Local models
+- torch: Deep learning
+- cProfile: Profiling
 
 ### Monitoring Dependencies
 - opentelemetry-api: Core API
@@ -214,6 +274,9 @@ debug quit
 - opentelemetry-exporter-otlp: OTLP export
 - prometheus-client: Prometheus integration
 - psutil: System metrics
+- Model metrics collector
+- Profiling metrics collector
+- Validation metrics collector
 
 ### Debugging Dependencies
 - cmd: Command interface
@@ -222,6 +285,9 @@ debug quit
 - pdb: Python debugger
 - threading: Synchronization
 - functools: Decorators
+- Model debugging tools
+- Profiling analysis tools
+- Validation debugging tools
 
 ### Development Dependencies
 - pytest: Testing framework
@@ -229,6 +295,10 @@ debug quit
 - flake8: Linter
 - mypy: Type checker
 - coverage: Code coverage
+- Bandit: Security scanner
+- Ruff: Style checker
+- cProfile: Profiler
+- Model development tools
 
 ### Alerting Dependencies
 - Prometheus: Alert rules engine
@@ -236,6 +306,9 @@ debug quit
 - Slack API: Notifications
 - Email: Alternative notifications
 - Templates: Alert formatting
+- Model alerting
+- Profiling alerts
+- Validation alerts
 
 ### Workspace Dependencies
 - pathlib: Path management
@@ -243,6 +316,9 @@ debug quit
 - typing: Type hints
 - shutil: Environment management
 - json: Configuration storage
+- Model workspace management
+- Profiling workspace management
+- Validation workspace management
 
 ## Integration Points
 
@@ -253,6 +329,9 @@ debug quit
 - System monitoring
 - Alert notification services
 - Debug interface
+- Model APIs
+- Profiling system
+- Validation system
 
 ### Internal Components
 - API server
@@ -262,6 +341,9 @@ debug quit
 - Metrics collection
 - Alert management
 - Debug system
+- Model management
+- Profiling management
+- Validation management
 
 ### Monitoring Components
 - OpenTelemetry SDK
@@ -270,6 +352,12 @@ debug quit
 - Grafana dashboard
 - AlertManager
 - Notification channels
+- Metrics collection
+- Alert management
+- Dashboard system
+- Model monitoring
+- Profiling monitoring
+- Validation monitoring
 
 ### Debugging Components
 - Interactive console
@@ -278,6 +366,9 @@ debug quit
 - History tracker
 - Stack inspector
 - Tool inspector
+- Model debugging tools
+- Profiling analysis tools
+- Validation debugging tools
 
 ## Configuration
 

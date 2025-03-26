@@ -8,6 +8,9 @@
 - Asynchronous command execution
 - Event-driven output streaming
 - Thread-safe process management
+- Advanced profiling system
+- OpenTelemetry integration
+- Code generation capabilities
 
 ### Component Structure
 ```
@@ -15,11 +18,13 @@ server.py
 ├── Core Tools
 │   ├── Command Execution
 │   ├── Process Management
-│   └── File Operations
+│   ├── File Operations
+│   └── Code Generation
 ├── Development Tools
 │   ├── Code Analysis
 │   ├── Performance Monitoring
-│   └── Testing Support
+│   ├── Testing Support
+│   └── Profiling
 └── Utility Tools
     ├── System Info
     ├── Calculations
@@ -33,21 +38,32 @@ server.py
 - Standardized input/output interface
 - Error handling and validation
 - Resource cleanup
+- Profiling integration
+- Metrics collection
 
 ### Observer Pattern
 - Process output streaming
 - Performance metrics collection
 - Event-based notifications
+- Profiling data collection
+- Code generation events
+- Validation results
 
 ### Factory Pattern
 - Tool registration and instantiation
 - Dynamic command creation
 - Plugin system support
+- Model factory for code generation
+- Profiler factory
+- Metrics collector factory
 
 ### Strategy Pattern
 - Configurable execution strategies
 - Platform-specific implementations
 - Test environment isolation
+- Model selection strategy
+- Profiling strategy
+- Validation strategy
 
 ## Security Patterns
 
@@ -55,16 +71,25 @@ server.py
 - Blacklist-based command filtering
 - Path traversal prevention
 - Resource limit enforcement
+- Code generation safety
+- Model access control
+- Input sanitization
 
 ### Process Isolation
 - Separate process spaces
 - Timeout enforcement
 - Resource cleanup
+- Model execution isolation
+- Profiling isolation
+- Validation isolation
 
 ### Error Handling
 - Comprehensive error capture
 - Structured error responses
 - Graceful degradation
+- Model error handling
+- Profiling error recovery
+- Validation error reporting
 
 ## Performance Patterns
 
@@ -72,16 +97,25 @@ server.py
 - Thread pool management
 - Process lifecycle control
 - Memory usage optimization
+- Model resource management
+- Profiling overhead control
+- Validation resource limits
 
 ### Output Handling
 - Streaming large outputs
 - Buffer management
 - Smart truncation
+- Model output streaming
+- Profiling data streaming
+- Validation result streaming
 
 ### Caching
 - Command result caching
 - File content caching
 - System info caching
+- Model response caching
+- Profiling data caching
+- Validation result caching
 
 ## Testing Patterns
 
@@ -89,16 +123,25 @@ server.py
 - Unit tests for core functionality
 - Integration tests for tool interaction
 - System tests for end-to-end validation
+- Model integration tests
+- Profiling tests
+- Validation tests
 
 ### Test Isolation
 - Docker-based test environments
 - Mock system operations
 - Resource cleanup
+- Model mocking
+- Profiling isolation
+- Validation isolation
 
 ### Performance Testing
 - Load testing framework
 - Resource usage monitoring
 - Benchmark suite
+- Model performance tests
+- Profiling overhead tests
+- Validation performance tests
 
 ## Development Patterns
 
@@ -106,6 +149,9 @@ server.py
 - Modular tool implementation
 - Clear separation of concerns
 - Consistent file structure
+- Model integration structure
+- Profiling integration
+- Validation organization
 
 ### Error Handling
 ```python
@@ -170,16 +216,25 @@ def tool_name(param1: Type1, param2: Type2 = default) -> Dict[str, Any]:
 - Standardized result format
 - Error propagation
 - Context sharing
+- Model communication
+- Profiling data sharing
+- Validation result sharing
 
 ### Resource Sharing
 - Thread-safe queues
 - Shared state management
 - Resource pools
+- Model resource sharing
+- Profiling resource sharing
+- Validation resource sharing
 
 ### Event Handling
 - Process lifecycle events
 - Error events
 - Status updates
+- Model events
+- Profiling events
+- Validation events
 
 ## Monitoring Patterns
 
@@ -188,16 +243,25 @@ def tool_name(param1: Type1, param2: Type2 = default) -> Dict[str, Any]:
 - Memory utilization
 - I/O operations
 - Network traffic
+- Model performance
+- Profiling metrics
+- Validation metrics
 
 ### Error Tracking
 - Error categorization
 - Stack trace collection
 - Error rate monitoring
+- Model errors
+- Profiling errors
+- Validation errors
 
 ### Health Checks
 - Service availability
 - Resource utilization
 - System status
+- Model health
+- Profiling health
+- Validation health
 
 ## Documentation Patterns
 
@@ -205,16 +269,25 @@ def tool_name(param1: Type1, param2: Type2 = default) -> Dict[str, Any]:
 - Google-style docstrings
 - Type hints
 - Usage examples
+- Model documentation
+- Profiling documentation
+- Validation documentation
 
 ### API Documentation
 - OpenAPI/Swagger specs
 - Example requests/responses
 - Error scenarios
+- Model API docs
+- Profiling API docs
+- Validation API docs
 
 ### System Documentation
 - Architecture overview
 - Component interaction
 - Deployment guides
+- Model deployment
+- Profiling setup
+- Validation setup
 
 ## Observability Patterns
 
@@ -224,6 +297,9 @@ def tool_name(param1: Type1, param2: Type2 = default) -> Dict[str, Any]:
    - OTLP exporter for trace export
    - Configurable collection endpoint
    - Batch processing for efficient trace export
+   - Model tracing
+   - Profiling tracing
+   - Validation tracing
 
 2. **Tool Tracing**
    - Decorator pattern for automatic tool tracing
@@ -234,18 +310,27 @@ def tool_name(param1: Type1, param2: Type2 = default) -> Dict[str, Any]:
      - Arguments
      - Status
      - Error details
+     - Model details
+     - Profiling details
+     - Validation details
 
 3. **Resource Attribution**
    - Service name and version tracking
    - OpenTelemetry semantic conventions
    - Configurable resource attributes
    - Dynamic resource updates
+   - Model resources
+   - Profiling resources
+   - Validation resources
 
 4. **Error Handling**
    - Exception capture in spans
    - Error attribute propagation
    - Status code tracking
    - Automatic error context collection
+   - Model error context
+   - Profiling error context
+   - Validation error context
 
 ### Metrics Architecture
 1. **Metrics Collection**
