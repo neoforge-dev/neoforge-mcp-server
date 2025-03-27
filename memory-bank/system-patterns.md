@@ -5,12 +5,22 @@
 ### MCP Server
 - FastMCP-based server implementation
 - RESTful API design with tool-based interface
+- Server-Sent Events (SSE) transport protocol
 - Asynchronous command execution
 - Event-driven output streaming
 - Thread-safe process management
 - Advanced profiling system
 - OpenTelemetry integration
 - Code generation capabilities
+
+### Connectivity Architecture
+- SSE-based communication protocol
+- Port configuration for external access
+- Traefik proxy integration for routing
+- Firewall configuration for security
+- SSH tunnel capability for secure access
+- Connection error handling 
+- Client reconnection strategies
 
 ### Component Structure
 ```
@@ -25,6 +35,11 @@ server.py
 │   ├── Performance Monitoring
 │   ├── Testing Support
 │   └── Profiling
+├── Connectivity Tools
+│   ├── Connection Management
+│   ├── Transport Configuration
+│   ├── Proxy Integration
+│   └── Network Troubleshooting
 └── Utility Tools
     ├── System Info
     ├── Calculations
@@ -32,6 +47,14 @@ server.py
 ```
 
 ## Design Patterns
+
+### Communication Patterns
+- Server-Sent Events (SSE) for unidirectional streaming
+- RESTful API for bidirectional communication
+- Protocol negotiation for client compatibility
+- Connection pooling for performance
+- Graceful degradation for network issues
+- Reconnection strategies for resilience
 
 ### Command Pattern
 - Each tool is implemented as a discrete command
@@ -67,6 +90,14 @@ server.py
 
 ## Security Patterns
 
+### Network Security
+- Port-specific firewall rules
+- Transport-level encryption options
+- Proxy-based request filtering
+- Connection source validation
+- Rate limiting for connection attempts
+- Connection monitoring for anomalies
+
 ### Command Validation
 - Blacklist-based command filtering
 - Path traversal prevention
@@ -92,6 +123,14 @@ server.py
 - Validation error reporting
 
 ## Performance Patterns
+
+### Connection Management
+- Connection pool optimization
+- Connection timeout handling
+- Reconnection backoff strategies
+- Load balancing for multiple clients
+- Connection metrics collection
+- Health checking for connections
 
 ### Resource Management
 - Thread pool management
@@ -126,6 +165,38 @@ server.py
 - Model integration tests
 - Profiling tests
 - Validation tests
+- Observability tool tests
+- Development tool tests
+- Documentation generation tests
+- Project management tool tests
+
+### Test Structure for MCP Tools
+```python
+def test_tool_name_success_case(fixture_setup):
+    """Test successful operation of the tool."""
+    # Arrange
+    test_params = {...}
+    expected_output = {...}
+    
+    # Act
+    result = server.tool_name(**test_params)
+    
+    # Assert
+    assert result["status"] == "success"
+    assert result["expected_key"] == expected_output
+    
+def test_tool_name_error_case(fixture_setup):
+    """Test error handling of the tool."""
+    # Arrange
+    invalid_params = {...}
+    
+    # Act
+    result = server.tool_name(**invalid_params)
+    
+    # Assert
+    assert result["status"] == "error"
+    assert "error" in result
+```
 
 ### Test Isolation
 - Docker-based test environments
@@ -134,6 +205,9 @@ server.py
 - Model mocking
 - Profiling isolation
 - Validation isolation
+- API endpoint mocking
+- File system sandboxing
+- Dependency injection for testability
 
 ### Performance Testing
 - Load testing framework
@@ -142,8 +216,141 @@ server.py
 - Model performance tests
 - Profiling overhead tests
 - Validation performance tests
+- Metrics collection validation
+- Tracing overhead assessment
+
+### Missing Test Implementation Patterns
+```python
+# Observability Tools Testing Pattern
+def test_observability_tool(mocker):
+    """Test pattern for observability tools."""
+    # Mock dependencies
+    mock_dependency = mocker.patch('module.dependency')
+    mock_dependency.return_value = expected_data
+    
+    # Call the tool
+    result = server.observability_tool(params)
+    
+    # Verify result
+    assert result["status"] == "success"
+    assert "expected_data" in result
+    mock_dependency.assert_called_once_with(params)
+
+# Development Tools Testing Pattern
+def test_development_tool(tmp_path, mocker):
+    """Test pattern for development tools."""
+    # Set up test environment
+    test_file = tmp_path / "test_file.py"
+    test_file.write_text("def test(): pass")
+    
+    # Mock subprocess calls
+    mock_run = mocker.patch('subprocess.run')
+    mock_run.return_value = Mock(returncode=0, stdout="Success", stderr="")
+    
+    # Call the tool
+    result = server.development_tool(str(test_file))
+    
+    # Verify result
+    assert result["status"] == "success"
+    assert mock_run.called
+    
+# Documentation Tools Testing Pattern
+def test_documentation_tool(tmp_path):
+    """Test pattern for documentation generation tools."""
+    # Set up test project
+    test_dir = tmp_path / "test_project"
+    test_dir.mkdir()
+    (test_dir / "test_module.py").write_text("def function(): \"\"\"Docstring\"\"\"")
+    
+    # Call the tool
+    result = server.documentation_tool(str(test_dir))
+    
+    # Verify result
+    assert result["status"] == "success"
+    assert (test_dir / "docs").exists()
+```
 
 ## Development Patterns
+
+### Connectivity Testing
+```python
+def test_server_connectivity(host: str, port: int) -> Dict[str, Any]:
+    """
+    Test server connectivity
+    
+    Args:
+        host: Server hostname
+        port: Server port
+    
+    Returns:
+        Dictionary with connectivity test results
+    """
+    try:
+        # Try to connect
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(5)
+            result = s.connect_ex((host, port))
+            
+        if result == 0:
+            return {
+                'status': 'success',
+                'message': f'Successfully connected to {host}:{port}'
+            }
+        else:
+            return {
+                'status': 'error',
+                'error': f'Failed to connect to {host}:{port}',
+                'code': result
+            }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+```
+
+### Transport Configuration
+```python
+def configure_transport(transport_type: str) -> Dict[str, Any]:
+    """
+    Configure server transport
+    
+    Args:
+        transport_type: Transport type ("sse" or "websocket")
+    
+    Returns:
+        Dictionary with configuration result
+    """
+    try:
+        # Validate transport type
+        valid_transports = ["sse", "websocket"]
+        if transport_type not in valid_transports:
+            return {
+                'status': 'error',
+                'error': f'Invalid transport: {transport_type}. Must be one of {valid_transports}'
+            }
+            
+        # Update configuration
+        config = {
+            'transport': transport_type,
+            'path': '/sse' if transport_type == 'sse' else '/ws',
+            'reconnect_interval': 1000
+        }
+        
+        # Save configuration
+        with open('config.json', 'w') as f:
+            json.dump(config, f)
+            
+        return {
+            'status': 'success',
+            'config': config
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+```
 
 ### Code Organization
 - Modular tool implementation

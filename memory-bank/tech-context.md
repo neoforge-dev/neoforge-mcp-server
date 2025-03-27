@@ -5,6 +5,8 @@
 ### Core Technologies
 - Python 3.8+
 - FastAPI for API server
+- Server-Sent Events (SSE) for transport protocol
+- Traefik for proxy and routing
 - Click for CLI framework
 - Rich for terminal UI
 - OpenTelemetry for observability
@@ -16,6 +18,17 @@
 - Transformers for local models
 - cProfile for profiling
 
+### Networking Stack
+- FastAPI for HTTP server
+- Server-Sent Events (SSE) for streaming
+- Traefik for reverse proxy and routing
+- SSH for secure server management
+- Socket connections for health checks
+- Firewall configuration with iptables
+- tcpdump for network diagnostics
+- Port configuration management
+- Network monitoring tools
+
 ### Monitoring Stack
 - OpenTelemetry SDK for metrics collection
 - Prometheus for metrics storage and alerting
@@ -26,6 +39,7 @@
 - Model performance tracking
 - Profiling data collection
 - Validation metrics
+- Connection status monitoring
 
 ### Debugging Stack
 - cmd module for CLI interface
@@ -83,11 +97,12 @@
 
 ### Running the Server
 1. Start the server: `python server.py [--debug]`
-2. Access API at `http://localhost:7443`
-3. Access Grafana at `http://localhost:3000`
-4. Access Prometheus at `http://localhost:9090`
-5. Access AlertManager at `http://localhost:9093`
-6. Access profiling dashboard at `http://localhost:7443/profiling`
+2. Access API at `http://localhost:9001`
+3. SSE endpoint at `http://localhost:9001/sse`
+4. Access Grafana at `http://localhost:3000`
+5. Access Prometheus at `http://localhost:9090`
+6. Access AlertManager at `http://localhost:9093`
+7. Access profiling dashboard at `http://localhost:9001/profiling`
 
 ### Using the CLI
 1. Run CLI commands: `python cli.py [command] [options] [--debug]`
@@ -374,7 +389,7 @@ debug validate <command> [options]
 
 ### Server Configuration
 - Host: localhost (default)
-- Port: 7443 (default)
+- Port: 9001 (default)
 - Debug mode toggle
 - Logging level
 
@@ -1084,3 +1099,87 @@ def validate_code_quality(
 - Performance analysis patterns
 - Environment configuration
 - Test coverage
+
+## Server Configuration
+
+### Transport Protocols
+- **SSE (Server-Sent Events)**: Primary transport protocol for streaming data from server to client
+- **HTTP REST API**: Used for standard request-response communication
+- **WebSocket**: Not currently supported but being considered for future implementations
+- **SSH**: Used for server management and tunneling
+
+### Port Configuration
+- Port 9001: MCP server (previously using port 7443)
+- Port 8080: Reserved for additional services
+- Port 80: Traefik HTTP entrypoint
+- Port 443: Traefik HTTPS entrypoint
+- Port 22: SSH access
+- Port 8000: Development server
+
+### Proxy Setup
+- Traefik as reverse proxy
+- Dynamic configuration via config files
+- Path-based routing (/mcp for MCP server)
+- Middleware for path stripping
+- Health checks for services
+- Automatic TLS certificate handling
+- Load balancing capability
+
+### Firewall Configuration
+- iptables for firewall management
+- Specific port allowances for required services
+- Default deny policy for security
+- SSH access always enabled
+- Monitoring of connection attempts
+- Rate limiting for protection
+
+### SSH Tunnel Setup
+```bash
+# Create SSH tunnel to access MCP server
+ssh -L 9001:localhost:9001 user@server
+
+# Access MCP server locally
+curl http://localhost:9001
+```
+
+### Server Hosting
+- DigitalOcean cloud hosting
+- Linux-based OS (Ubuntu)
+- Root access for management
+- Automated service management
+- systemd for service control
+- Centralized logging
+- Regular backups
+
+## Network Troubleshooting Commands
+```bash
+# Check if server is running
+ps aux | grep mcp
+
+# Test server connectivity
+curl -v http://localhost:9001
+
+# Check open ports
+ss -tulpn | grep 9001
+
+# Check firewall status
+iptables -L -n -v
+
+# Monitor network traffic
+tcpdump -i any port 9001 -n
+
+# Trace network route
+traceroute host
+
+# Set up SSH tunnel
+ssh -L 9001:localhost:9001 user@server
+
+# Test proxy configuration
+curl -v http://server/mcp
+
+# Check proxy logs
+journalctl -u traefik
+
+# Restart MCP server
+kill -9 PID && cd /path/to/server && . .venv/bin/activate && mcp dev server.py &
+```

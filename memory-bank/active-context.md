@@ -1,6 +1,12 @@
 # Terminal Command Runner MCP - Active Context
 
 ## Current Focus
+- Server connectivity and deployment troubleshooting
+- Ensuring stable connections to the MCP server from remote clients
+- Transport protocol compatibility (SSE vs WebSocket)
+- Network configuration and firewall settings
+- Port availability and configuration
+- Proxy setup with Traefik
 - Code generation system implementation
 - Profiling system implementation
 - Validation system implementation
@@ -13,6 +19,10 @@
 - Debugging enhancements
 
 ## Recent Changes
+- Fixed server connectivity issue by changing transport from WebSocket to SSE
+- Verified server is running on port 9001 with SSE transport
+- Configured Traefik to route traffic to the MCP server
+- Identified and fixed server startup errors
 - Added code generation system with multiple model support
 - Implemented advanced profiling system
 - Added code validation system
@@ -25,7 +35,16 @@
 - Improved error handling
 
 ## Implementation Plan
-1. Code Generation System
+1. Server Connectivity (NEW HIGH PRIORITY)
+   - [x] Diagnose transport protocol issues
+   - [x] Configure server to use supported SSE transport
+   - [x] Verify server is listening on correct ports
+   - [x] Test connectivity from various clients
+   - [ ] Implement proper error handling for connection failures
+   - [ ] Document connection process and troubleshooting steps
+   - [ ] Set up monitoring for connection status
+
+2. Code Generation System
    - [x] Basic model integration
    - [x] Model management
    - [x] Generation pipeline
@@ -36,7 +55,7 @@
    - [ ] Documentation
    - [ ] Testing
 
-2. Profiling System
+3. Profiling System
    - [x] Basic profiling
    - [x] Metrics collection
    - [x] Dashboard
@@ -47,7 +66,7 @@
    - [ ] Documentation
    - [ ] Testing
 
-3. Validation System
+4. Validation System
    - [x] Basic validation
    - [x] Check integration
    - [x] Analysis tools
@@ -58,7 +77,7 @@
    - [ ] Documentation
    - [ ] Testing
 
-4. Model Management
+5. Model Management
    - [x] API integration
    - [x] Local model support
    - [x] Resource management
@@ -69,7 +88,7 @@
    - [ ] Documentation
    - [ ] Testing
 
-5. Performance Optimization
+6. Performance Optimization
    - [x] Basic profiling
    - [x] Metrics collection
    - [x] Analysis tools
@@ -79,7 +98,7 @@
    - [ ] Documentation
    - [ ] Testing
 
-6. Security Hardening
+7. Security Hardening
    - [x] Basic security
    - [x] Access control
    - [x] Input validation
@@ -89,7 +108,7 @@
    - [ ] Documentation
    - [ ] Testing
 
-7. Documentation
+8. Documentation
    - [x] Basic documentation
    - [x] API documentation
    - [x] User guides
@@ -98,7 +117,7 @@
    - [ ] Tutorials
    - [ ] Testing
 
-8. Testing
+9. Testing
    - [x] Basic tests
    - [x] Integration tests
    - [x] System tests
@@ -108,111 +127,125 @@
    - [ ] Documentation
 
 ## Next Steps
-1. Complete code generation system
+1. Complete server connectivity troubleshooting
+   - Ensure server remains stable with SSE transport
+   - Document all network configuration requirements
+   - Create comprehensive connection troubleshooting guide
+   - Test connectivity from various network environments
+   - Implement connection resilience and auto-reconnection
+
+2. Complete code generation system
    - Implement advanced features
    - Optimize performance
    - Enhance security
    - Update documentation
    - Add tests
 
-2. Complete profiling system
+3. Complete profiling system
    - Implement advanced features
    - Optimize performance
    - Enhance security
    - Update documentation
    - Add tests
 
-3. Complete validation system
+4. Complete validation system
    - Implement advanced features
    - Optimize performance
    - Enhance security
    - Update documentation
    - Add tests
 
-4. Complete model management
+5. Complete model management
    - Implement advanced features
    - Optimize performance
    - Enhance security
    - Update documentation
    - Add tests
 
-5. Complete performance optimization
+6. Complete performance optimization
    - Implement advanced features
    - Optimize resources
    - Enhance scaling
    - Update documentation
    - Add tests
 
-6. Complete security hardening
+7. Complete security hardening
    - Implement advanced features
    - Enhance compliance
    - Add auditing
    - Update documentation
    - Add tests
 
-7. Complete documentation
+8. Complete documentation
    - Add advanced documentation
    - Create examples
    - Write tutorials
    - Add tests
 
-8. Complete testing
+9. Complete testing
    - Add advanced tests
    - Add performance tests
    - Add security tests
    - Update documentation
 
 ## Active Decisions
-1. Code Generation
+1. Server Connectivity
+   - Using SSE transport instead of WebSocket (WebSocket not supported)
+   - Running server on port 9001 to avoid conflicts
+   - Using Traefik for proxying connections
+   - Maintaining SSH access for server management
+   - Implementing proper error handling for connection issues
+
+2. Code Generation
    - Using multiple model providers
    - Supporting local models
    - Integrating with validation
    - Using profiling for optimization
    - Implementing security controls
 
-2. Profiling
+3. Profiling
    - Using cProfile for basic profiling
    - Collecting detailed metrics
    - Providing analysis tools
    - Implementing security controls
    - Optimizing performance
 
-3. Validation
+4. Validation
    - Using multiple checkers
    - Supporting custom checks
    - Providing analysis tools
    - Implementing security controls
    - Optimizing performance
 
-4. Model Management
+5. Model Management
    - Supporting multiple providers
    - Managing resources
    - Tracking performance
    - Implementing security
    - Optimizing usage
 
-5. Performance
+6. Performance
    - Using profiling data
    - Collecting metrics
    - Analyzing bottlenecks
    - Optimizing resources
    - Scaling system
 
-6. Security
+7. Security
    - Implementing access control
    - Validating inputs
    - Protecting resources
    - Auditing actions
    - Ensuring compliance
 
-7. Documentation
+8. Documentation
    - Using Markdown format
    - Providing examples
    - Writing tutorials
    - Including tests
    - Maintaining accuracy
 
-8. Testing
+9. Testing
    - Using pytest
    - Testing all features
    - Testing performance
@@ -220,56 +253,64 @@
    - Maintaining coverage
 
 ## Known Issues
-1. Code Generation
+1. Server Connectivity
+   - Transport protocol limitations (WebSocket not supported)
+   - Potential firewall restrictions on cloud provider
+   - Proxy configuration complexity
+   - Connection timeouts from certain networks
+   - Error handling limitations
+   - Lack of comprehensive documentation
+
+2. Code Generation
    - Model API rate limits
    - Local model resource usage
    - Generation latency
    - Output validation
    - Security concerns
 
-2. Profiling
+3. Profiling
    - Overhead impact
    - Data storage
    - Analysis complexity
    - Resource usage
    - Security concerns
 
-3. Validation
+4. Validation
    - Check performance
    - False positives
    - Resource usage
    - Analysis complexity
    - Security concerns
 
-4. Model Management
+5. Model Management
    - Resource allocation
    - Performance tracking
    - Error handling
    - Security controls
    - Scaling issues
 
-5. Performance
+6. Performance
    - Resource bottlenecks
    - Scaling limitations
    - Latency issues
    - Memory usage
    - CPU usage
 
-6. Security
+7. Security
    - Access control gaps
    - Input validation
    - Resource protection
    - Audit logging
    - Compliance issues
 
-7. Documentation
+8. Documentation
    - Coverage gaps
    - Outdated content
    - Missing examples
    - Incomplete tutorials
    - Test coverage
 
-8. Testing
+9. Testing
    - Coverage gaps
    - Performance tests
    - Security tests
@@ -361,4 +402,11 @@
     - Update management
     - Model maintenance
     - Profiling maintenance
-    - Validation maintenance 
+    - Validation maintenance
+
+## Less Relevant Areas (Deprioritized)
+- Advanced UI customization features
+- Support for deprecated protocols
+- Low-priority integrations with external systems
+- Optimization for resource-constrained environments
+- Legacy compatibility features 
