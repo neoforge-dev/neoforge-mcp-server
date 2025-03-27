@@ -12,6 +12,19 @@
 - Advanced profiling system
 - OpenTelemetry integration
 - Code generation capabilities
+- AI Coding Agent tools integration
+
+### AI Coding Agent Tools Architecture
+- Code understanding and analysis system
+- Intelligent refactoring framework
+- Automated test generation system
+- Dependency impact analysis engine
+- Code review automation platform
+- Language-agnostic parsing with tree-sitter
+- Semantic code mapping system
+- Relationship graph visualization
+- Persistent indexing for large codebases
+- Embedding-based semantic search
 
 ### Connectivity Architecture
 - SSE-based communication protocol
@@ -35,6 +48,12 @@ server.py
 │   ├── Performance Monitoring
 │   ├── Testing Support
 │   └── Profiling
+├── AI Coding Agent Tools
+│   ├── Code Understanding
+│   ├── Intelligent Refactoring
+│   ├── Test Generation
+│   ├── Dependency Impact Analysis
+│   └── Code Review Automation
 ├── Connectivity Tools
 │   ├── Connection Management
 │   ├── Transport Configuration
@@ -47,6 +66,16 @@ server.py
 ```
 
 ## Design Patterns
+
+### AI Coding Agent Tool Patterns
+- **Code Analysis Pattern**: Language-agnostic parsing with custom extractors
+- **Graph-Based Code Representation**: Nodes for entities, edges for relationships
+- **Semantic Mapping**: Embedding-based connectivity between code and natural language
+- **Incremental Analysis**: Update only changed components for performance
+- **Persistent Indexing**: Serialize and store analysis results for quick access
+- **Language Adapter**: Plug-in architecture for multi-language support
+- **Analysis Pipeline**: Multi-stage processing with progressive refinement
+- **Entity Resolver**: Connect references across different files and modules
 
 ### Communication Patterns
 - Server-Sent Events (SSE) for unidirectional streaming
@@ -87,6 +116,115 @@ server.py
 - Model selection strategy
 - Profiling strategy
 - Validation strategy
+
+## Implementation Patterns for AI Coding Agent Tools
+
+### Code Understanding Tool
+```python
+class CodeAnalyzer:
+    """Core code analysis engine."""
+    
+    def __init__(self, target_path: str):
+        self.target_path = target_path
+        self.parsers = {}
+        self.register_parsers()
+        
+    def register_parsers(self):
+        """Register language-specific parsers."""
+        self.parsers = {
+            ".py": PythonParser(),
+            ".js": JavaScriptParser(),
+            ".ts": TypeScriptParser(),
+            # More languages...
+        }
+        
+    def analyze(self, depth: int = 2, include_external: bool = False) -> AnalysisResult:
+        """Analyze code at the specified path."""
+        result = AnalysisResult()
+        
+        # Find all files to analyze
+        files = self._find_files(include_external)
+        
+        # Parse files and extract symbols
+        for file_path in files:
+            extension = os.path.splitext(file_path)[1]
+            if extension in self.parsers:
+                parser = self.parsers[extension]
+                file_analysis = parser.parse(file_path)
+                result.add_file_analysis(file_analysis)
+        
+        # Build relationships up to specified depth
+        result.build_relationships(depth)
+        
+        return result
+    
+    def _find_files(self, include_external: bool) -> List[str]:
+        """Find files to analyze."""
+        # Implementation details...
+        pass
+        
+class GraphBuilder:
+    """Builds relationship graphs from analysis results."""
+    
+    def __init__(self, analysis_result: AnalysisResult):
+        self.analysis_result = analysis_result
+        self.graph = nx.DiGraph()
+        
+    def build(self) -> CodeGraph:
+        """Build a directed graph of code relationships."""
+        # Add nodes for all symbols
+        for symbol in self.analysis_result.symbols:
+            self.graph.add_node(symbol.id, **symbol.attributes)
+        
+        # Add edges for relationships
+        for relationship in self.analysis_result.relationships:
+            self.graph.add_edge(
+                relationship.source_id,
+                relationship.target_id,
+                type=relationship.type,
+                **relationship.attributes
+            )
+        
+        return CodeGraph(self.graph)
+```
+
+### Intelligent Refactoring Tool
+```python
+class RefactoringPlanner:
+    """Plans code refactoring operations."""
+    
+    def plan_refactoring(self, code_graph: CodeGraph, target: str, refactoring_type: str) -> RefactoringPlan:
+        """Create a plan for refactoring the specified target."""
+        # Implementation details...
+        pass
+        
+class BehaviorValidator:
+    """Validates that refactoring preserves behavior."""
+    
+    def validate(self, original_code: str, refactored_code: str) -> ValidationResult:
+        """Check if the refactored code preserves the behavior of the original code."""
+        # Implementation details...
+        pass
+```
+
+### Test Generation Tool
+```python
+class TestGenerator:
+    """Generates tests for code."""
+    
+    def generate_tests(self, source_code: str, coverage_target: float = 0.8) -> List[TestCase]:
+        """Generate test cases for the given source code."""
+        # Implementation details...
+        pass
+        
+class EdgeCaseDiscoverer:
+    """Discovers edge cases for testing."""
+    
+    def discover(self, source_code: str) -> List[EdgeCase]:
+        """Find potential edge cases in the source code."""
+        # Implementation details...
+        pass
+```
 
 ## Security Patterns
 

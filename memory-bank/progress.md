@@ -109,6 +109,13 @@
 
 ## In Progress
 
+### AI Coding Agent MCP Tools
+- 🔄 Evaluation and prioritization of new tools
+- 🔄 Architecture design for Code Understanding Tool
+- 🔄 Implementation planning for new AI agent tools
+- 🔄 Research on code analysis technologies
+- 🔄 Investigation of tree-sitter integration options
+
 ### Test Coverage Implementation
 - 🔄 Evaluation of current test coverage
 - 🔄 Identification of tools missing tests
@@ -180,6 +187,54 @@
 - 🔄 Documentation
 
 ## Planned Features
+
+### AI Coding Agent MCP Tools
+- 📋 Code Understanding Tool
+  - 📋 Week 1: Setup & Core Analysis
+    - 📋 Implement tree-sitter integration
+    - 📋 Create language-specific parsers
+    - 📋 Build core analysis infrastructure
+    - 📋 Implement symbol extraction
+  - 📋 Week 2: Relationship Graph
+    - 📋 Implement graph data structure
+    - 📋 Build relationship extraction logic
+    - 📋 Create visualization export formats
+    - 📋 Develop incremental updates
+  - 📋 Week 3: Semantic Mapping
+    - 📋 Implement semantic extraction
+    - 📋 Build context mapping system
+    - 📋 Create embedding-based search
+    - 📋 Integrate with analysis engine
+  - 📋 Week 4: Indexing & Integration
+    - 📋 Implement persistent storage
+    - 📋 Build incremental updates
+    - 📋 Create MCP tool interface
+    - 📋 Write comprehensive tests
+  - 📋 Week 5: Testing & Documentation
+    - 📋 Implement end-to-end tests
+    - 📋 Write documentation
+    - 📋 Performance optimization
+    - 📋 Create example workflows
+- 📋 Intelligent Refactoring Tool
+  - 📋 Code modification planning
+  - 📋 Behavior preservation validation
+  - 📋 Implementation discovery
+  - 📋 Multi-step refactoring
+- 📋 Test Generation Tool
+  - 📋 Automated test case generation
+  - 📋 Code coverage optimization
+  - 📋 Edge case discovery
+  - 📋 Test suite management
+- 📋 Dependency Impact Analysis Tool
+  - 📋 Dependency graph construction
+  - 📋 Impact prediction
+  - 📋 Change recommendation
+  - 📋 Visualization interface
+- 📋 Code Review Automation Tool
+  - 📋 Style checking
+  - 📋 Best practice verification
+  - 📋 Performance hotspot detection
+  - 📋 Security vulnerability scanning
 
 ### Test Coverage Implementation
 - 📋 Implement tests for observability tools

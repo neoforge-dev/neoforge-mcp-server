@@ -337,6 +337,185 @@ def test_generate_documentation_error(mocker):
 
 Similar detailed test implementations will be provided for setup_validation_gates, analyze_project, and manage_changes tools.
 
+### Phase 5: AI Coding Agent Tools
+
+#### Test Goals
+- Verify that each AI Coding Agent tool functions correctly
+- Ensure tools handle various programming languages and project structures
+- Test error handling and edge cases
+- Validate performance characteristics meet requirements
+
+#### understand_code Tests
+
+```python
+class TestUnderstandCode:
+    """Tests for the understand_code tool."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.test_project = create_test_project()
+        
+    def teardown_method(self):
+        """Clean up test resources."""
+        clean_test_project(self.test_project)
+        
+    def test_understand_code_basic_analysis(self):
+        """Test basic code analysis functionality."""
+        # Arrange
+        target_path = os.path.join(self.test_project, "sample.py")
+        
+        # Act
+        result = server.understand_code(
+            target_path=target_path,
+            analysis_depth=1,
+            include_external_deps=False,
+            output_format="graph"
+        )
+        
+        # Assert
+        assert result["status"] == "success"
+        assert "output" in result
+        assert "graph" in result["output"]
+        assert "metadata" in result
+        assert result["metadata"]["files_analyzed"] > 0
+        
+    def test_understand_code_deep_analysis(self):
+        """Test deep analysis with multiple files."""
+        # Arrange
+        target_path = self.test_project
+        
+        # Act
+        result = server.understand_code(
+            target_path=target_path,
+            analysis_depth=3,
+            include_external_deps=True,
+            output_format="map"
+        )
+        
+        # Assert
+        assert result["status"] == "success"
+        assert "output" in result
+        assert "map" in result["output"]
+        assert result["metadata"]["files_analyzed"] > 1
+        assert result["metadata"]["relationships_found"] > 0
+        
+    def test_understand_code_invalid_path(self):
+        """Test error handling for invalid path."""
+        # Arrange
+        target_path = "/path/does/not/exist"
+        
+        # Act
+        result = server.understand_code(
+            target_path=target_path,
+            analysis_depth=1
+        )
+        
+        # Assert
+        assert result["status"] == "error"
+        assert "error" in result
+```
+
+#### refactor_code Tests
+
+```python
+class TestRefactorCode:
+    """Tests for the refactor_code tool."""
+    
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.test_project = create_test_project()
+        
+    def teardown_method(self):
+        """Clean up test resources."""
+        clean_test_project(self.test_project)
+        
+    def test_refactor_code_rename_symbol(self):
+        """Test refactoring that renames a symbol."""
+        # Arrange
+        target_path = os.path.join(self.test_project, "sample.py")
+        refactoring_type = "rename"
+        original_name = "example_function"
+        new_name = "renamed_function"
+        
+        # Act
+        result = server.refactor_code(
+            target_path=target_path,
+            refactoring_type=refactoring_type,
+            original_name=original_name,
+            new_name=new_name
+        )
+        
+        # Assert
+        assert result["status"] == "success"
+        assert result["changes"] > 0
+        assert "modified_files" in result
+        
+        # Verify the function was actually renamed
+        with open(target_path, "r") as f:
+            content = f.read()
+            assert original_name not in content
+            assert new_name in content
+            
+    def test_refactor_code_extract_method(self):
+        """Test refactoring that extracts a method."""
+        # Implementation details...
+        pass
+        
+    def test_refactor_code_error_handling(self):
+        """Test error handling in refactoring."""
+        # Implementation details...
+        pass
+```
+
+#### generate_tests Tests
+
+```python
+class TestGenerateTests:
+    """Tests for the generate_tests tool."""
+    
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.test_project = create_test_project()
+        
+    def teardown_method(self):
+        """Clean up test resources."""
+        clean_test_project(self.test_project)
+        
+    def test_generate_tests_basic_function(self):
+        """Test generating tests for a basic function."""
+        # Arrange
+        target_path = os.path.join(self.test_project, "sample.py")
+        
+        # Act
+        result = server.generate_tests(
+            target_path=target_path,
+            coverage_target=0.8
+        )
+        
+        # Assert
+        assert result["status"] == "success"
+        assert "tests" in result
+        assert len(result["tests"]) > 0
+        assert "test_file_path" in result
+        
+        # Verify test file was created and contains tests
+        assert os.path.exists(result["test_file_path"])
+        with open(result["test_file_path"], "r") as f:
+            content = f.read()
+            assert "test_" in content
+            assert "assert" in content
+            
+    def test_generate_tests_complex_class(self):
+        """Test generating tests for a complex class."""
+        # Implementation details...
+        pass
+        
+    def test_generate_tests_edge_cases(self):
+        """Test generation of edge case tests."""
+        # Implementation details...
+        pass
+```
+
 ## Test Environment Setup
 
 For all tests, we'll use the following setup:
@@ -380,7 +559,14 @@ For all tests, we'll use the following setup:
    - analyze_project
    - manage_changes
 
-5. **Week 5**: Finalize and optimize test suite
+5. **Week 5**: Implement tests for AI Coding Agent tools
+   - understand_code
+   - refactor_code
+   - generate_tests
+   - analyze_dependencies
+   - review_code
+
+6. **Week 6**: Finalize and optimize test suite
    - Improve test coverage where needed
    - Optimize test performance
    - Document testing patterns and practices

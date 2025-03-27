@@ -1,6 +1,12 @@
 # Terminal Command Runner MCP - Active Context
 
 ## Current Focus
+- AI Coding Agent MCP tools implementation
+- Code Understanding Tool development
+- Intelligent Refactoring Tool implementation
+- Test Generation Tool development 
+- Dependency Impact Analysis Tool creation
+- Code Review Automation Tool implementation
 - Server connectivity and deployment troubleshooting
 - Ensuring stable connections to the MCP server from remote clients
 - Transport protocol compatibility (SSE vs WebSocket)
@@ -19,6 +25,9 @@
 - Debugging enhancements
 
 ## Recent Changes
+- Evaluated and prioritized new MCP tools for AI Coding Agents
+- Created detailed implementation plan for Code Understanding Tool
+- Developed architecture for new AI agent tools
 - Fixed server connectivity issue by changing transport from WebSocket to SSE
 - Verified server is running on port 9001 with SSE transport
 - Configured Traefik to route traffic to the MCP server
@@ -35,7 +44,19 @@
 - Improved error handling
 
 ## Implementation Plan
-1. Server Connectivity (NEW HIGH PRIORITY)
+1. AI Coding Agent MCP Tools (NEW HIGHEST PRIORITY)
+   - [ ] Code Understanding Tool
+     - [ ] Core code analysis engine implementation
+     - [ ] Relationship graph builder development
+     - [ ] Semantic mapper implementation
+     - [ ] Code indexer development
+     - [ ] MCP tool interface integration
+   - [ ] Intelligent Refactoring Tool
+   - [ ] Test Generation Tool
+   - [ ] Dependency Impact Analysis Tool
+   - [ ] Code Review Automation Tool
+
+2. Server Connectivity (HIGH PRIORITY)
    - [x] Diagnose transport protocol issues
    - [x] Configure server to use supported SSE transport
    - [x] Verify server is listening on correct ports
@@ -44,7 +65,7 @@
    - [ ] Document connection process and troubleshooting steps
    - [ ] Set up monitoring for connection status
 
-2. Code Generation System
+3. Code Generation System
    - [x] Basic model integration
    - [x] Model management
    - [x] Generation pipeline
@@ -55,7 +76,7 @@
    - [ ] Documentation
    - [ ] Testing
 
-3. Profiling System
+4. Profiling System
    - [x] Basic profiling
    - [x] Metrics collection
    - [x] Dashboard
@@ -66,7 +87,7 @@
    - [ ] Documentation
    - [ ] Testing
 
-4. Validation System
+5. Validation System
    - [x] Basic validation
    - [x] Check integration
    - [x] Analysis tools
@@ -77,7 +98,7 @@
    - [ ] Documentation
    - [ ] Testing
 
-5. Model Management
+6. Model Management
    - [x] API integration
    - [x] Local model support
    - [x] Resource management
@@ -88,7 +109,7 @@
    - [ ] Documentation
    - [ ] Testing
 
-6. Performance Optimization
+7. Performance Optimization
    - [x] Basic profiling
    - [x] Metrics collection
    - [x] Analysis tools
@@ -98,7 +119,7 @@
    - [ ] Documentation
    - [ ] Testing
 
-7. Security Hardening
+8. Security Hardening
    - [x] Basic security
    - [x] Access control
    - [x] Input validation
@@ -108,7 +129,7 @@
    - [ ] Documentation
    - [ ] Testing
 
-8. Documentation
+9. Documentation
    - [x] Basic documentation
    - [x] API documentation
    - [x] User guides
@@ -117,140 +138,156 @@
    - [ ] Tutorials
    - [ ] Testing
 
-9. Testing
-   - [x] Basic tests
-   - [x] Integration tests
-   - [x] System tests
-   - [ ] Advanced tests
-   - [ ] Performance tests
-   - [ ] Security tests
-   - [ ] Documentation
+10. Testing
+    - [x] Basic tests
+    - [x] Integration tests
+    - [x] System tests
+    - [ ] Advanced tests
+    - [ ] Performance tests
+    - [ ] Security tests
+    - [ ] Documentation
 
 ## Next Steps
-1. Complete server connectivity troubleshooting
+1. Implement Code Understanding Tool
+   - Set up core architecture for analysis engine
+   - Develop tree-sitter integration for parsing
+   - Create relationship graph building system
+   - Implement semantic mapping functionality
+   - Build persistent indexing system
+   - Create MCP tool interface
+
+2. Complete server connectivity troubleshooting
    - Ensure server remains stable with SSE transport
    - Document all network configuration requirements
    - Create comprehensive connection troubleshooting guide
    - Test connectivity from various network environments
    - Implement connection resilience and auto-reconnection
 
-2. Complete code generation system
+3. Complete code generation system
    - Implement advanced features
    - Optimize performance
    - Enhance security
    - Update documentation
    - Add tests
 
-3. Complete profiling system
+4. Complete profiling system
    - Implement advanced features
    - Optimize performance
    - Enhance security
    - Update documentation
    - Add tests
 
-4. Complete validation system
+5. Complete validation system
    - Implement advanced features
    - Optimize performance
    - Enhance security
    - Update documentation
    - Add tests
 
-5. Complete model management
+6. Complete model management
    - Implement advanced features
    - Optimize performance
    - Enhance security
    - Update documentation
    - Add tests
 
-6. Complete performance optimization
+7. Complete performance optimization
    - Implement advanced features
    - Optimize resources
    - Enhance scaling
    - Update documentation
    - Add tests
 
-7. Complete security hardening
+8. Complete security hardening
    - Implement advanced features
    - Enhance compliance
    - Add auditing
    - Update documentation
    - Add tests
 
-8. Complete documentation
+9. Complete documentation
    - Add advanced documentation
    - Create examples
    - Write tutorials
    - Add tests
 
-9. Complete testing
-   - Add advanced tests
-   - Add performance tests
-   - Add security tests
-   - Update documentation
+10. Complete testing
+    - Add advanced tests
+    - Add performance tests
+    - Add security tests
+    - Update documentation
 
 ## Active Decisions
-1. Server Connectivity
+1. AI Coding Agent MCP Tools
+   - Prioritized Code Understanding Tool as most impactful for AI agents
+   - Selected tree-sitter for language-agnostic parsing
+   - Implementing graph-based code relationship mapping
+   - Using embedding-based semantic search for code context
+   - Will support incremental analysis for performance
+   - Targeting 5-week implementation timeline
+
+2. Server Connectivity
    - Using SSE transport instead of WebSocket (WebSocket not supported)
    - Running server on port 9001 to avoid conflicts
    - Using Traefik for proxying connections
    - Maintaining SSH access for server management
    - Implementing proper error handling for connection issues
 
-2. Code Generation
+3. Code Generation
    - Using multiple model providers
    - Supporting local models
    - Integrating with validation
    - Using profiling for optimization
    - Implementing security controls
 
-3. Profiling
+4. Profiling
    - Using cProfile for basic profiling
    - Collecting detailed metrics
    - Providing analysis tools
    - Implementing security controls
    - Optimizing performance
 
-4. Validation
+5. Validation
    - Using multiple checkers
    - Supporting custom checks
    - Providing analysis tools
    - Implementing security controls
    - Optimizing performance
 
-5. Model Management
+6. Model Management
    - Supporting multiple providers
    - Managing resources
    - Tracking performance
    - Implementing security
    - Optimizing usage
 
-6. Performance
+7. Performance
    - Using profiling data
    - Collecting metrics
    - Analyzing bottlenecks
    - Optimizing resources
    - Scaling system
 
-7. Security
+8. Security
    - Implementing access control
    - Validating inputs
    - Protecting resources
    - Auditing actions
    - Ensuring compliance
 
-8. Documentation
+9. Documentation
    - Using Markdown format
    - Providing examples
    - Writing tutorials
    - Including tests
    - Maintaining accuracy
 
-9. Testing
-   - Using pytest
-   - Testing all features
-   - Testing performance
-   - Testing security
-   - Maintaining coverage
+10. Testing
+    - Using pytest
+    - Testing all features
+    - Testing performance
+    - Testing security
+    - Maintaining coverage
 
 ## Known Issues
 1. Server Connectivity
