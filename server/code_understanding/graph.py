@@ -3,17 +3,28 @@
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Set, Any
+from typing import Dict, List, Optional, Set, Any, Union
 
 logger = logging.getLogger(__name__)
 
+class NodeType(Enum):
+    """Node types."""
+    MODULE = 'module'
+    FUNCTION = 'function'
+    CLASS = 'class'
+    METHOD = 'method'
+    PARAMETER = 'parameter'
+    VARIABLE = 'variable'
+    ATTRIBUTE = 'attribute'
+    SYMBOL = 'symbol'
+
 class RelationType(Enum):
-    """Types of relationships between nodes."""
+    """Edge types."""
     IMPORTS = 'imports'
-    INHERITS = 'inherits'
     CONTAINS = 'contains'
     CALLS = 'calls'
     REFERENCES = 'references'
+    INHERITS = 'inherits'
 
 @dataclass
 class Node:
@@ -29,9 +40,9 @@ class Node:
 @dataclass
 class Edge:
     """An edge in the graph."""
-    source: Node
-    target: Node
-    type: RelationType
+    from_node: str
+    to_node: str
+    type: str
     properties: Dict[str, Any] = field(default_factory=dict)
 
 class Graph:
@@ -69,26 +80,38 @@ class Graph:
             )
         return self.nodes[node_id]
 
-    def add_edge(self, source: Node, target: Node, type: RelationType, properties: Optional[Dict[str, Any]] = None) -> Edge:
+    def add_edge(self, from_node: str, to_node: str, type: str, properties: Optional[Dict[str, Any]] = None) -> None:
         """Add an edge to the graph.
 
         Args:
-            source: Source node
-            target: Target node
+            from_node: Source node ID
+            to_node: Target node ID
             type: Edge type
             properties: Optional edge properties
-
-        Returns:
-            Added edge
         """
-        edge = Edge(
-            source=source,
-            target=target,
-            type=type,
-            properties=properties or {}
-        )
+        if not properties:
+            properties = {}
+
+        edge = Edge(from_node=from_node, to_node=to_node, type=type, properties=properties)
         self.edges.append(edge)
-        return edge
+
+    def create_edge(self, from_node: Node, to_node: Node, type: RelationType, properties: Optional[Dict[str, Any]] = None) -> None:
+        """Create an edge between two nodes.
+
+        Args:
+            from_node: Source node
+            to_node: Target node
+            type: Edge type
+            properties: Optional edge properties
+        """
+        if not properties:
+            properties = {}
+
+        if from_node.id not in self.nodes or to_node.id not in self.nodes:
+            raise ValueError("Both nodes must exist in the graph")
+
+        edge = Edge(from_node=from_node.id, to_node=to_node.id, type=type.value, properties=properties)
+        self.edges.append(edge)
 
     def get_node(self, node_id: str) -> Optional[Node]:
         """Get a node by ID.
@@ -101,34 +124,29 @@ class Graph:
         """
         return self.nodes.get(node_id)
 
-    def get_edges(self, source_id: Optional[str] = None, target_id: Optional[str] = None, rel_type: Optional[RelationType] = None) -> List[Edge]:
-        """Get edges matching criteria.
+    def get_edges(self, source_id: Optional[str] = None, target_id: Optional[str] = None, rel_type: Optional[str] = None) -> List[Edge]:
+        """Get edges matching the given criteria.
 
         Args:
-            source_id: Optional source node ID
-            target_id: Optional target node ID
-            rel_type: Optional relationship type
+            source_id: Optional source node ID to filter by
+            target_id: Optional target node ID to filter by
+            rel_type: Optional relationship type to filter by
 
         Returns:
             List of matching edges
         """
-        print(f"Getting edges with source_id={source_id}, target_id={target_id}, rel_type={rel_type}")
-        print(f"All edges: {self.edges}")
-        edges = []
+        result = []
         for edge in self.edges:
-            print(f"Checking edge: source={edge.source.id}, target={edge.target.id}, type={edge.type}")
-            if source_id and edge.source.id != source_id:
-                print(f"Skipping edge due to source_id mismatch: {edge.source.id} != {source_id}")
-                continue
-            if target_id and edge.target.id != target_id:
-                print(f"Skipping edge due to target_id mismatch: {edge.target.id} != {target_id}")
-                continue
-            if rel_type and edge.type != rel_type:
-                print(f"Skipping edge due to rel_type mismatch: {edge.type} != {rel_type}")
-                continue
-            print(f"Adding edge to result: {edge}")
-            edges.append(edge)
-        return edges
+            matches = True
+            if source_id is not None and edge.from_node != source_id:
+                matches = False
+            if target_id is not None and edge.to_node != target_id:
+                matches = False
+            if rel_type is not None and edge.type != rel_type:
+                matches = False
+            if matches:
+                result.append(edge)
+        return result
 
     def get_nodes_by_type(self, node_type: str) -> List[Node]:
         """Get nodes of a specific type.
@@ -155,4 +173,36 @@ class Graph:
     def clear(self) -> None:
         """Clear all nodes and edges."""
         self.nodes.clear()
-        self.edges.clear() 
+        self.edges.clear()
+
+    def find_or_create_node(self, name: str, type: NodeType, properties: Optional[Dict[str, Any]] = None) -> Node:
+        """Find an existing node or create a new one.
+
+        Args:
+            name: Node name
+            type: Node type
+            properties: Optional node properties
+
+        Returns:
+            The found or created node
+        """
+        # Create a unique ID for the node
+        node_id = f"{name}:{type.value}"
+
+        # Check if node already exists
+        if node_id in self.nodes:
+            return self.nodes[node_id]
+
+        # Get file path from properties or use empty string
+        file_path = properties.get('file_path', '') if properties else ''
+
+        # Create new node
+        node = Node(
+            id=node_id,
+            name=name,
+            type=type.value,
+            file_path=file_path,
+            properties=properties or {}
+        )
+        self.nodes[node_id] = node
+        return node 

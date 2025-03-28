@@ -10,7 +10,7 @@ from server.code_understanding.relationships import (
     FileContext,
     IGNORED_NAMES
 )
-from server.code_understanding.graph import Graph, Node, Edge, RelationType
+from server.code_understanding.graph import Graph, Node, Edge, RelationType, NodeType
 
 @pytest.fixture
 def sample_code():
@@ -46,7 +46,13 @@ def mock_parser():
     """Create a mock parser for testing."""
     parser = Mock()
     parser.parse.return_value = Mock()  # Mock tree
-    parser.extract_symbols.return_value = (
+    return parser
+
+@pytest.fixture
+def mock_extractor():
+    """Create a mock extractor for testing."""
+    extractor = Mock()
+    extractor.extract_symbols.return_value = (
         {
             'imports': [
                 {'module': 'os', 'start_line': 1, 'end_line': 1},
@@ -85,13 +91,14 @@ def mock_parser():
             'variables': []
         }
     )
-    return parser
+    return extractor
 
 @pytest.fixture
-def builder(mock_parser):
+def builder(mock_parser, mock_extractor):
     """Create a RelationshipBuilder instance with mock parser."""
     builder = RelationshipBuilder()
     builder.parser = mock_parser
+    builder.extractor = mock_extractor
     return builder
 
 def test_analyze_file(tmp_path, builder, sample_code):
@@ -179,29 +186,44 @@ def test_clear(builder, tmp_path, sample_code):
 
 def test_process_imports(builder):
     """Test processing import statements."""
+    # Create a current file node
+    builder.current_file_node = builder.graph.find_or_create_node(
+        name="test.py",
+        type=NodeType.MODULE,
+        properties={
+            'file_path': "test.py"
+        }
+    )
+
     imports = [
         {'module': 'os', 'start_line': 1, 'end_line': 1},
         {'module': 'sys', 'symbol': 'path', 'start_line': 2, 'end_line': 2},
         {'module': 'typing', 'symbol': 'List', 'alias': 'ListType', 'start_line': 3, 'end_line': 3}
     ]
-    
+
     builder._process_imports(imports)
+
+    # Verify nodes were created
     graph = builder.get_relationships()
-    
-    # Verify module nodes were created
-    module_nodes = [n for n in graph.nodes.values() if n.type == 'module']
+    module_nodes = graph.get_nodes_by_type('module')
     assert len(module_nodes) == 3  # os, sys, typing
-    
-    # Verify import nodes were created
-    import_nodes = [n for n in graph.nodes.values() if n.type == 'import']
-    assert len(import_nodes) == 2  # path, ListType
-    
+    assert {n.name for n in module_nodes} == {'os', 'sys', 'typing', 'test.py'}
+
     # Verify edges were created
     edges = graph.get_edges(rel_type=RelationType.IMPORTS)
-    assert len(edges) == 4  # os->os, sys->path, typing->ListType
+    assert len(edges) == 4  # test.py -> os, test.py -> sys, test.py -> path, test.py -> List
 
 def test_process_classes(builder):
     """Test processing class definitions."""
+    # Create a current file node
+    builder.current_file_node = builder.graph.find_or_create_node(
+        name="test.py",
+        type=NodeType.MODULE,
+        properties={
+            'file_path': "test.py"
+        }
+    )
+
     context = FileContext(
         path="test.py",
         code="",
@@ -220,23 +242,23 @@ def test_process_classes(builder):
             ]
         }
     )
-    
+
     builder._process_classes(context)
     graph = builder.get_relationships()
-    
+
     # Verify class node was created
     class_nodes = graph.get_nodes_by_type('class')
     assert len(class_nodes) == 1
     assert class_nodes[0].name == 'TestClass'
-    
+
     # Verify method nodes were created
     method_nodes = graph.get_nodes_by_type('method')
     assert len(method_nodes) == 2
     assert {n.name for n in method_nodes} == {'method1', 'method2'}
-    
+
     # Verify contains edges were created
     edges = graph.get_edges(rel_type=RelationType.CONTAINS)
-    assert len(edges) == 2  # TestClass contains each method
+    assert len(edges) == 3  # test.py -> TestClass, TestClass -> method1, TestClass -> method2
 
 def test_process_functions(builder):
     """Test processing function definitions."""
@@ -310,4 +332,334 @@ def test_file_context_initialization():
     assert context.references['imports'] == []
     assert context.references['calls'] == []
     assert context.references['attributes'] == []
-    assert context.references['variables'] == [] 
+    assert context.references['variables'] == []
+
+def test_process_classes_with_inheritance(builder):
+    """Test processing class definitions with inheritance."""
+    # Create a current file node
+    builder.current_file_node = builder.graph.find_or_create_node(
+        name="test.py",
+        type=NodeType.MODULE,
+        properties={
+            'file_path': "test.py"
+        }
+    )
+
+    context = FileContext(
+        path="test.py",
+        code="",
+        tree=Mock(),
+        symbols={
+            'classes': [
+                {
+                    'name': 'BaseClass',
+                    'start_line': 1,
+                    'end_line': 5,
+                    'methods': [
+                        {'name': 'base_method', 'start_line': 2, 'end_line': 3}
+                    ]
+                },
+                {
+                    'name': 'DerivedClass',
+                    'start_line': 7,
+                    'end_line': 12,
+                    'bases': ['BaseClass'],
+                    'methods': [
+                        {'name': 'derived_method', 'start_line': 8, 'end_line': 9}
+                    ]
+                }
+            ]
+        }
+    )
+
+    builder._process_classes(context)
+    graph = builder.get_relationships()
+
+    # Verify class nodes were created
+    class_nodes = graph.get_nodes_by_type('class')
+    assert len(class_nodes) == 2
+    assert {n.name for n in class_nodes} == {'BaseClass', 'DerivedClass'}
+
+    # Verify method nodes were created
+    method_nodes = graph.get_nodes_by_type('method')
+    assert len(method_nodes) == 2
+    assert {n.name for n in method_nodes} == {'base_method', 'derived_method'}
+
+    # Verify inheritance edge was created
+    edges = graph.get_edges(rel_type=RelationType.INHERITS)
+    assert len(edges) == 1  # DerivedClass -> BaseClass
+
+def test_process_classes_with_multiple_inheritance(builder):
+    """Test processing class definitions with multiple inheritance."""
+    # Create a current file node
+    builder.current_file_node = builder.graph.find_or_create_node(
+        name="test.py",
+        type=NodeType.MODULE,
+        properties={
+            'file_path': "test.py"
+        }
+    )
+
+    context = FileContext(
+        path="test.py",
+        code="",
+        tree=Mock(),
+        symbols={
+            'classes': [
+                {
+                    'name': 'ClassA',
+                    'start_line': 1,
+                    'end_line': 5,
+                    'methods': [
+                        {'name': 'method_a', 'start_line': 2, 'end_line': 3}
+                    ]
+                },
+                {
+                    'name': 'ClassB',
+                    'start_line': 7,
+                    'end_line': 11,
+                    'methods': [
+                        {'name': 'method_b', 'start_line': 8, 'end_line': 9}
+                    ]
+                },
+                {
+                    'name': 'ClassC',
+                    'start_line': 13,
+                    'end_line': 18,
+                    'bases': ['ClassA', 'ClassB'],
+                    'methods': [
+                        {'name': 'method_c', 'start_line': 14, 'end_line': 15}
+                    ]
+                }
+            ]
+        }
+    )
+
+    builder._process_classes(context)
+    graph = builder.get_relationships()
+
+    # Verify class nodes were created
+    class_nodes = graph.get_nodes_by_type('class')
+    assert len(class_nodes) == 3
+    assert {n.name for n in class_nodes} == {'ClassA', 'ClassB', 'ClassC'}
+
+    # Verify method nodes were created
+    method_nodes = graph.get_nodes_by_type('method')
+    assert len(method_nodes) == 3
+    assert {n.name for n in method_nodes} == {'method_a', 'method_b', 'method_c'}
+
+    # Verify inheritance edges were created
+    edges = graph.get_edges(rel_type=RelationType.INHERITS)
+    assert len(edges) == 2  # ClassC -> ClassA, ClassC -> ClassB
+
+def test_process_functions_with_parameters(builder):
+    """Test processing function definitions with parameters."""
+    # Create a current file node
+    builder.current_file_node = builder.graph.find_or_create_node(
+        name="test.py",
+        type=NodeType.MODULE,
+        properties={
+            'file_path': "test.py"
+        }
+    )
+
+    context = FileContext(
+        path="test.py",
+        code="",
+        tree=Mock(),
+        symbols={
+            'functions': [
+                {
+                    'name': 'complex_function',
+                    'start_line': 1,
+                    'end_line': 10,
+                    'parameters': [
+                        {'name': 'param1', 'start_line': 1, 'end_line': 1},
+                        {'name': 'param2: str', 'start_line': 1, 'end_line': 1},
+                        {'name': 'param3: int = 42', 'start_line': 1, 'end_line': 1}
+                    ]
+                }
+            ]
+        }
+    )
+
+    builder._process_functions(context)
+    graph = builder.get_relationships()
+
+    # Verify function node was created
+    function_nodes = graph.get_nodes_by_type('function')
+    assert len(function_nodes) == 1
+    assert function_nodes[0].name == 'complex_function'
+
+    # Verify parameter nodes were created
+    parameter_nodes = graph.get_nodes_by_type('parameter')
+    assert len(parameter_nodes) == 3
+    assert {n.name for n in parameter_nodes} == {'param1', 'param2: str', 'param3: int = 42'}
+
+    # Verify contains edges were created
+    edges = graph.get_edges(rel_type=RelationType.CONTAINS)
+    assert len(edges) == 4  # test.py -> complex_function, complex_function -> param1, complex_function -> param2, complex_function -> param3
+
+def test_process_references_with_complex_scopes(builder):
+    """Test processing references with complex scopes."""
+    # Create a current file node
+    builder.current_file_node = builder.graph.find_or_create_node(
+        name="test.py",
+        type=NodeType.MODULE,
+        properties={
+            'file_path': "test.py"
+        }
+    )
+
+    context = FileContext(
+        path="test.py",
+        code="",
+        tree=Mock(),
+        references={
+            'calls': [
+                {
+                    'name': 'method1',
+                    'scope': 'ClassA.method2',
+                    'start_line': 1,
+                    'end_line': 1
+                },
+                {
+                    'name': 'method2',
+                    'scope': 'ClassB.method3',
+                    'start_line': 2,
+                    'end_line': 2
+                }
+            ],
+            'attributes': [
+                {
+                    'name': 'attr1',
+                    'scope': 'ClassA.method1',
+                    'start_line': 3,
+                    'end_line': 3
+                }
+            ]
+        }
+    )
+
+    # Add nodes that will be referenced
+    builder.graph.add_node(name='ClassA', type='class', file_path='test.py')
+    builder.graph.add_node(name='method1', type='method', file_path='test.py')
+    builder.graph.add_node(name='method2', type='method', file_path='test.py')
+    builder.graph.add_node(name='ClassB', type='class', file_path='test.py')
+    builder.graph.add_node(name='method3', type='method', file_path='test.py')
+
+    builder._process_references(context)
+    graph = builder.get_relationships()
+
+    # Verify call edges were created
+    call_edges = graph.get_edges(rel_type=RelationType.CALLS)
+    assert len(call_edges) == 2  # ClassA.method2 -> method1, ClassB.method3 -> method2
+
+def test_process_references_with_external_symbols(builder):
+    """Test processing references to external symbols."""
+    # Create a current file node
+    builder.current_file_node = builder.graph.find_or_create_node(
+        name="test.py",
+        type=NodeType.MODULE,
+        properties={
+            'file_path': "test.py"
+        }
+    )
+
+    context = FileContext(
+        path="test.py",
+        code="",
+        tree=Mock(),
+        references={
+            'calls': [
+                {
+                    'name': 'external_func',
+                    'scope': 'local_func',
+                    'start_line': 1,
+                    'end_line': 1
+                }
+            ]
+        }
+    )
+
+    # Add local function node
+    builder.graph.add_node(name='local_func', type='function', file_path='test.py')
+
+    builder._process_references(context)
+    graph = builder.get_relationships()
+
+    # Verify external function node was created
+    function_nodes = graph.get_nodes_by_type('function')
+    assert len(function_nodes) == 2  # local_func and external_func
+
+def test_cross_file_references(tmp_path, builder):
+    """Test handling of references across multiple files."""
+    # Create test files
+    file1 = tmp_path / "file1.py"
+    file1.write_text("""
+def func1():
+    return "Hello"
+
+class ClassA:
+    def method1(self):
+        return func1()
+    """)
+
+    file2 = tmp_path / "file2.py"
+    file2.write_text("""
+from file1 import func1, ClassA
+
+def func2():
+    return func1()
+
+class ClassB(ClassA):
+    def method2(self):
+        return self.method1()
+    """)
+
+    # Analyze both files
+    builder.analyze_file(str(file1))
+    builder.analyze_file(str(file2))
+
+    graph = builder.get_relationships()
+
+    # Verify cross-file relationships
+    edges = graph.get_edges(rel_type=RelationType.IMPORTS)
+    assert len(edges) > 0  # file2 imports from file1
+
+    # Verify inheritance edges
+    edges = graph.get_edges(rel_type=RelationType.INHERITS)
+    assert len(edges) == 1  # ClassB inherits from ClassA
+
+    # Verify function calls
+    edges = graph.get_edges(rel_type=RelationType.CALLS)
+    assert len(edges) > 0  # func2 calls func1, method2 calls method1
+
+def test_relationship_builder_with_empty_file(builder):
+    """Test relationship builder with an empty file."""
+    context = FileContext(
+        path="empty.py",
+        code="",
+        tree=Mock(),
+        symbols={
+            'imports': [],
+            'functions': [],
+            'classes': [],
+            'variables': []
+        },
+        references={
+            'calls': [],
+            'attributes': [],
+            'variables': []
+        }
+    )
+    
+    # Process empty context
+    builder._process_imports(context.symbols['imports'])
+    builder._process_classes(context)
+    builder._process_functions(context)
+    builder._process_references(context)
+    
+    graph = builder.get_relationships()
+    assert len(graph.nodes) == 0
+    assert len(graph.edges) == 0 

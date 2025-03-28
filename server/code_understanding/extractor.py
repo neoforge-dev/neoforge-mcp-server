@@ -40,6 +40,26 @@ class SymbolExtractor:
             logger.error(f"Failed to extract symbols: {e}")
             return {}, {'imports': [], 'calls': [], 'attributes': [], 'variables': []}
             
+    def extract_references(self, tree: Any) -> Dict[str, List[Dict[str, Any]]]:
+        """Extract references from a syntax tree.
+        
+        Args:
+            tree: Syntax tree to analyze
+            
+        Returns:
+            Dictionary of references
+        """
+        try:
+            self.references.clear()
+            self.current_scope = 'global'
+            
+            self._process_node(tree)
+            return self.references
+            
+        except Exception as e:
+            logger.error(f"Failed to extract references: {e}")
+            return {'imports': [], 'calls': [], 'attributes': [], 'variables': []}
+            
     def _process_node(self, node: Any, parent_scope: Optional[str] = None):
         """Process a syntax tree node and extract symbols.
         

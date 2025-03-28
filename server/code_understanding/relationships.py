@@ -5,9 +5,11 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Any
+import ast
 
 from .parser import CodeParser
-from .graph import Graph, Node, Edge, RelationType
+from .extractor import SymbolExtractor
+from .graph import Graph, Node, NodeType, RelationType
 
 logger = logging.getLogger(__name__)
 
@@ -17,58 +19,102 @@ IGNORED_NAMES = {'self', 'cls'}
 @dataclass
 class FileContext:
     """Context for a file being analyzed."""
-    path: str
-    code: str
-    tree: object
-    symbols: Dict[str, List[dict]] = field(default_factory=lambda: {
-        'imports': [],
-        'functions': [],
-        'classes': [],
-        'variables': []
-    })
-    references: Dict[str, List[dict]] = field(default_factory=lambda: {
-        'imports': [],
-        'calls': [],
-        'attributes': [],
-        'variables': []
-    })
+
+    def __init__(self, path: str, code: Optional[str] = None, tree: Optional[Any] = None, symbols: Optional[Dict[str, Any]] = None, references: Optional[Dict[str, Any]] = None) -> None:
+        """Initialize file context.
+
+        Args:
+            path: Path to the file
+            code: Original code string
+            tree: AST tree
+            symbols: Dictionary of symbols extracted from the file
+            references: Dictionary of references extracted from the file
+        """
+        self.path = path
+        self.code = code
+        self.tree = tree
+        self.symbols = symbols or {
+            'imports': [],
+            'functions': [],
+            'classes': [],
+            'variables': []
+        }
+        self.references = references or {
+            'imports': [],
+            'calls': [],
+            'attributes': [],
+            'variables': []
+        }
 
 class RelationshipBuilder:
-    """Builds relationships between code elements."""
+    """Builder for creating relationship graphs from code."""
 
     def __init__(self):
         """Initialize the relationship builder."""
-        self.parser = CodeParser()
         self.graph = Graph()
-        self.file_contexts: Dict[str, FileContext] = {}
-        self._processed_modules: Set[str] = set()
+        self.file_contexts = {}
+        self.ignored_names = {'self', 'cls', 'super', 'object', 'type', 'None', 'True', 'False'}
+        self.extractor = SymbolExtractor()
+        self.parser = CodeParser()
 
-    def analyze_file(self, file_path: str, code: Optional[str] = None) -> None:
-        """Analyze a file and build relationships.
+    def analyze_file(self, file_path: str, code: Optional[str] = None) -> FileContext:
+        """Analyze a file and extract relationships.
 
         Args:
-            file_path: Path to the file
-            code: Optional code string. If not provided, reads from file_path.
+            file_path: Path to the file to analyze
+            code: Optional code string. If not provided, will read from file_path
+
+        Returns:
+            FileContext containing the analysis results
+
+        Raises:
+            ValueError: If file_path is empty or code cannot be parsed
+            FileNotFoundError: If file does not exist and no code is provided
+            Exception: For any other errors during analysis
         """
+        if not file_path:
+            raise ValueError("file_path cannot be empty")
+
         try:
             if code is None:
+                if not os.path.exists(file_path):
+                    raise FileNotFoundError(f"File not found: {file_path}")
                 with open(file_path, 'r') as f:
                     code = f.read()
 
-            tree = self.parser.parse(code)
-            symbols, references = self.parser.extract_symbols(tree)
-            context = FileContext(
-                path=file_path,
-                code=code,
-                tree=tree,
-                symbols=symbols,
-                references=references
+            if not code:
+                raise ValueError("Code cannot be empty")
+
+            tree = ast.parse(code)
+            context = FileContext(path=file_path, code=code, tree=tree)
+            
+            # Create a node for the current file
+            self.current_file_node = self.graph.find_or_create_node(
+                name=file_path,
+                type=NodeType.MODULE,
+                properties={
+                    'file_path': file_path
+                }
             )
-            self.file_contexts[file_path] = context
-            self._build_file_relationships(file_path)
+
+            # Extract symbols and references
+            extractor = SymbolExtractor()
+            symbols, _ = extractor.extract_symbols(tree)
+            context.symbols = symbols
+            context.references = extractor.extract_references(tree)
+
+            # Process the extracted information
+            self._process_imports(context.symbols.get('imports', []))
+            self._process_functions(context)
+            self._process_classes(context)
+            self._process_references(context)
+
+            return context
+
+        except (SyntaxError, IndentationError) as e:
+            raise ValueError(f"Failed to parse code: {str(e)}")
         except Exception as e:
-            logger.error(f"Failed to analyze file {file_path}: {str(e)}")
-            raise
+            raise Exception(f"Error analyzing file {file_path}: {str(e)}")
 
     def analyze_directory(self, directory: str) -> None:
         """Analyze all Python files in a directory.
@@ -104,385 +150,317 @@ class RelationshipBuilder:
         """Clear all analysis data."""
         self.graph.clear()
         self.file_contexts.clear()
-        self._processed_modules.clear()
 
-    def _build_file_relationships(self, file_path: str) -> None:
+    def _build_file_relationships(self, context: FileContext) -> None:
         """Build relationships for a file.
 
         Args:
-            file_path: Path to the file
+            context: The file context to process
         """
         try:
-            context = self.file_contexts[file_path]
-            
-            # Process imports first to ensure module nodes exist
+            # Process imports
             self._process_imports(context.symbols.get('imports', []))
-            
-            # Process classes to create class nodes and inheritance relationships
+
+            # Process classes
             self._process_classes(context)
-            
+
             # Process functions
             self._process_functions(context)
-            
-            # Process references after all nodes are created
+
+            # Process references
             self._process_references(context)
-            
         except Exception as e:
-            logger.error(f"Failed to build relationships for {file_path}: {str(e)}")
+            logger.error(f"Failed to build relationships for {context}: {str(e)}")
             raise
 
-    def _process_imports(self, imports: List[Dict[str, Any]]) -> None:
-        """Process import statements and create corresponding nodes and edges.
-        
+    def _process_imports(self, imports: List[dict]) -> None:
+        """Process imports and create corresponding nodes and edges.
+
         Args:
-            imports: List of import information dictionaries
+            imports: List of import dictionaries, each containing 'module' and optionally 'symbol' keys
         """
-        try:
-            for imp in imports:
-                module = imp.get('module', '')
-                symbol = imp.get('symbol', '')
-                alias = imp.get('alias', '')
-                
-                if not module:
-                    continue
-                    
-                # Create module node if not already processed
-                module_node = None
-                for node in self.graph.nodes.values():
-                    if node.name == module and node.type == 'module':
-                        module_node = node
-                        break
-                if not module_node:
-                    module_node = self.graph.add_node(
-                        name=module,
-                        type='module',
-                        file_path='',  # External module
-                        start_line=imp.get('start_line', 0),
-                        end_line=imp.get('end_line', 0)
-                    )
-                    self._processed_modules.add(module)
-                
-                # Create self-referential edge for direct imports and non-aliased symbol imports
-                if not symbol or (symbol and not alias):
-                    edge_exists = False
-                    for edge in self.graph.get_edges():
-                        if (edge.source == module_node and edge.target == module_node and
-                            edge.type == RelationType.IMPORTS):
-                            edge_exists = True
-                            break
-                    if not edge_exists:
-                        self.graph.add_edge(module_node, module_node, type=RelationType.IMPORTS)
-                
-                if symbol:
-                    # For 'from' imports, create a node for the imported symbol
-                    symbol_name = alias if alias else symbol
-                    # Check if symbol node already exists
-                    symbol_node = None
-                    for node in self.graph.nodes.values():
-                        if node.name == symbol_name and node.type == 'import':
-                            symbol_node = node
-                            break
-                    if not symbol_node:
-                        symbol_node = self.graph.add_node(
-                            name=symbol_name,
-                            type='import',
-                            file_path='',  # External symbol
-                            start_line=imp.get('start_line', 0),
-                            end_line=imp.get('end_line', 0)
-                        )
-                    # Create edge from module to symbol if it doesn't exist
-                    edge_exists = False
-                    for edge in self.graph.get_edges():
-                        if (edge.source == module_node and edge.target == symbol_node and
-                            edge.type == RelationType.IMPORTS):
-                            edge_exists = True
-                            break
-                    if not edge_exists:
-                        self.graph.add_edge(module_node, symbol_node, type=RelationType.IMPORTS)
-                elif alias:
-                    # For direct module imports with alias
-                    alias_node = None
-                    for node in self.graph.nodes.values():
-                        if node.name == alias and node.type == 'import':
-                            alias_node = node
-                            break
-                    if not alias_node:
-                        alias_node = self.graph.add_node(
-                            name=alias,
-                            type='import',
-                            file_path='',  # External module
-                            start_line=imp.get('start_line', 0),
-                            end_line=imp.get('end_line', 0)
-                        )
-                    # Create edge from module to alias if it doesn't exist
-                    edge_exists = False
-                    for edge in self.graph.get_edges():
-                        if (edge.source == module_node and edge.target == alias_node and
-                            edge.type == RelationType.IMPORTS):
-                            edge_exists = True
-                            break
-                    if not edge_exists:
-                        self.graph.add_edge(module_node, alias_node, type=RelationType.IMPORTS)
-                    
-        except Exception as e:
-            logger.error(f"Failed to process imports: {str(e)}")
-            raise
+        if not isinstance(imports, list):
+            raise ValueError("imports must be a list")
+
+        for import_info in imports:
+            if not isinstance(import_info, dict) or 'module' not in import_info:
+                raise ValueError("Each import must be a dictionary with a 'module' key")
+
+            module_name = import_info['module']
+            module_node = self.graph.find_or_create_node(
+                name=module_name,
+                type=NodeType.MODULE,
+                properties={
+                    'start_line': import_info.get('start_line'),
+                    'end_line': import_info.get('end_line')
+                }
+            )
+
+            # Always create an edge from the current file to the module
+            self.graph.create_edge(
+                from_node=self.current_file_node,
+                to_node=module_node,
+                type=RelationType.IMPORTS,
+                properties={
+                    'line': import_info.get('start_line')
+                }
+            )
+
+            # If a symbol is specified, create a symbol node and edges
+            if 'symbol' in import_info and import_info['symbol']:
+                symbol_name = import_info['symbol']
+                symbol_node = self.graph.find_or_create_node(
+                    name=symbol_name,
+                    type=NodeType.SYMBOL,
+                    properties={
+                        'start_line': import_info.get('start_line'),
+                        'end_line': import_info.get('end_line')
+                    }
+                )
+
+                # Create an edge from the module to the symbol
+                self.graph.create_edge(
+                    from_node=module_node,
+                    to_node=symbol_node,
+                    type=RelationType.CONTAINS,
+                    properties={
+                        'line': import_info.get('start_line')
+                    }
+                )
+
+                # Create an edge from the current file to the symbol
+                self.graph.create_edge(
+                    from_node=self.current_file_node,
+                    to_node=symbol_node,
+                    type=RelationType.IMPORTS,
+                    properties={
+                        'line': import_info.get('start_line')
+                    }
+                )
 
     def _process_classes(self, context: FileContext) -> None:
         """Process class definitions and create nodes and edges.
-        
+
         Args:
-            context: The context containing class information
+            context: FileContext containing the class definitions to process.
+
+        Raises:
+            ValueError: If context is not a FileContext or if classes are invalid.
         """
-        try:
-            for class_info in context.symbols.get('classes', []):
-                class_name = class_info.get('name', '')
-                if not class_name:
-                    continue
-                    
-                # Create class node
-                class_node = self.graph.add_node(
-                    name=class_name,
-                    type='class',
-                    file_path=context.path,
-                    start_line=class_info.get('start_line', 0),
-                    end_line=class_info.get('end_line', 0)
+        if not isinstance(context, FileContext):
+            raise ValueError("Context must be a FileContext")
+
+        classes = context.symbols.get('classes', [])
+        if not isinstance(classes, list):
+            raise ValueError("Classes must be a list")
+
+        for class_info in classes:
+            if not isinstance(class_info, dict) or 'name' not in class_info:
+                raise ValueError("Each class must be a dictionary with a 'name' key")
+
+            class_name = class_info['name']
+            class_node = self.graph.find_or_create_node(
+                name=class_name,
+                type=NodeType.CLASS,
+                properties={
+                    'file_path': context.path,
+                    'start_line': class_info.get('start_line'),
+                    'end_line': class_info.get('end_line')
+                }
+            )
+
+            # Create edge from file to class
+            self.graph.create_edge(
+                from_node=self.current_file_node,
+                to_node=class_node,
+                type=RelationType.CONTAINS,
+                properties={
+                    'line': class_info.get('start_line')
+                }
+            )
+
+            # Process inheritance
+            bases = class_info.get('bases', [])
+            for base_name in bases:
+                base_node = self.graph.find_or_create_node(
+                    name=base_name,
+                    type=NodeType.CLASS,
+                    properties={
+                        'file_path': context.path
+                    }
                 )
-                
-                # Process base classes
-                for base in class_info.get('bases', []):
-                    # Find or create base class node
-                    base_node = None
-                    for node in self.graph.nodes.values():
-                        if node.name == base and node.type == 'class':
-                            base_node = node
-                            break
-                            
-                    if not base_node:
-                        base_node = self.graph.add_node(
-                            name=base,
-                            type='class',
-                            file_path='',  # External class
-                            start_line=0,
-                            end_line=0
-                        )
-                        
-                    # Create inheritance edge
-                    self.graph.add_edge(class_node, base_node, type=RelationType.INHERITS)
-                
-                # Process methods
-                for method in class_info.get('methods', []):
-                    method_name = method.get('name', '')
-                    if not method_name:
-                        continue
-                        
-                    # Create method node
-                    method_node = self.graph.add_node(
-                        name=method_name,
-                        type='method',
-                        file_path=context.path,
-                        start_line=method.get('start_line', 0),
-                        end_line=method.get('end_line', 0)
-                    )
-                    
-                    # Create edge from class to method
-                    self.graph.add_edge(class_node, method_node, type=RelationType.CONTAINS)
-                    
-        except Exception as e:
-            logger.error(f"Failed to process classes: {str(e)}")
-            raise
+                self.graph.create_edge(
+                    from_node=class_node,
+                    to_node=base_node,
+                    type=RelationType.INHERITS,
+                    properties={
+                        'line': class_info.get('start_line')
+                    }
+                )
+
+            # Process methods
+            methods = class_info.get('methods', [])
+            for method_info in methods:
+                if not isinstance(method_info, dict) or 'name' not in method_info:
+                    raise ValueError("Each method must be a dictionary with a 'name' key")
+
+                method_name = method_info['name']
+                method_node = self.graph.find_or_create_node(
+                    name=method_name,
+                    type=NodeType.METHOD,
+                    properties={
+                        'file_path': context.path,
+                        'start_line': method_info.get('start_line'),
+                        'end_line': method_info.get('end_line')
+                    }
+                )
+
+                # Create edge from class to method
+                self.graph.create_edge(
+                    from_node=class_node,
+                    to_node=method_node,
+                    type=RelationType.CONTAINS,
+                    properties={
+                        'line': method_info.get('start_line')
+                    }
+                )
 
     def _process_functions(self, context: FileContext) -> None:
-        """Process functions and create nodes."""
-        for func in context.symbols.get('functions', []):
-            name = func.get('name', '')
-            if not name:
-                continue
+        """Process functions in a file.
+
+        Args:
+            context: FileContext containing the functions to process
+        """
+        if not isinstance(context, FileContext):
+            raise ValueError("context must be a FileContext instance")
+
+        functions = context.symbols.get('functions', [])
+        if not isinstance(functions, list):
+            raise ValueError("functions must be a list")
+
+        for func in functions:
+            if not isinstance(func, dict) or 'name' not in func:
+                raise ValueError("Each function must be a dictionary with a 'name' key")
 
             # Create function node
-            func_node = self.graph.add_node(
-                name=name,
-                type='function',
-                file_path=context.path,
-                start_line=func.get('start_line', 0),
-                end_line=func.get('end_line', 0)
+            func_node = self.graph.find_or_create_node(
+                name=func['name'],
+                type=NodeType.FUNCTION,
+                properties={
+                    'file_path': context.path,
+                    'start_line': func.get('start_line'),
+                    'end_line': func.get('end_line')
+                }
             )
 
             # Process parameters
             for param in func.get('parameters', []):
-                param_name = param.get('name', '')
-                if not param_name or param_name in ('self', 'cls'):
+                if not isinstance(param, dict) or 'name' not in param:
                     continue
-
-                # Skip type hints
-                if param_name.startswith('str') or param_name.startswith('int') or param_name.startswith('float') or param_name.startswith('bool'):
-                    continue
-
-                # Remove type hints from parameter names
-                if ':' in param_name:
-                    param_name = param_name.split(':')[0].strip()
 
                 # Create parameter node
-                param_node = self.graph.add_node(
-                    name=param_name,
-                    type='variable',
-                    file_path=context.path,
-                    start_line=param.get('start_line', 0),
-                    end_line=param.get('end_line', 0)
+                param_node = self.graph.find_or_create_node(
+                    name=param['name'],
+                    type=NodeType.PARAMETER,
+                    properties={
+                        'file_path': context.path,
+                        'start_line': param.get('start_line'),
+                        'end_line': param.get('end_line')
+                    }
                 )
 
-                # Add edge from function to parameter
-                self.graph.add_edge(
-                    source=func_node,
-                    target=param_node,
-                    type=RelationType.CONTAINS
+                # Create edge from function to parameter
+                self.graph.create_edge(
+                    from_node=func_node,
+                    to_node=param_node,
+                    type=RelationType.CONTAINS,
+                    properties={
+                        'line': param.get('start_line')
+                    }
                 )
 
     def _process_references(self, context: FileContext) -> None:
-        """Process code references and create edges.
-        
+        """Process references in a file.
+
         Args:
-            context: The context containing reference information
+            context: FileContext containing the references to process
         """
-        try:
-            # Process function calls
-            for call in context.references.get('calls', []):
-                caller_scope = call.get('scope', '')
-                callee_name = call.get('name', '')
-                
-                if not caller_scope or not callee_name:
-                    continue
-                    
-                # Find caller node
-                caller_node = None
-                for node in self.graph.nodes.values():
-                    if node.name == caller_scope:
-                        caller_node = node
-                        break
-                        
-                if not caller_node:
-                    continue
-                    
-                # Find callee node
-                callee_node = None
-                for node in self.graph.nodes.values():
-                    if node.name == callee_name:
-                        callee_node = node
-                        break
-                        
-                if not callee_node:
-                    # Create external function node
-                    callee_node = self.graph.add_node(
-                        name=callee_name,
-                        type='function',
-                        file_path='',  # External function
-                        start_line=call.get('start_line', 0),
-                        end_line=call.get('end_line', 0)
-                    )
-                    
-                # Create call edge
-                self.graph.add_edge(
-                    caller_node,
-                    callee_node,
-                    type=RelationType.CALLS,
-                    properties={
-                        'line_number': call.get('start_line', 0),
-                        'scope': caller_scope
-                    }
-                )
-                
-            # Process variable references
-            for var_ref in context.references.get('variables', []):
-                ref_name = var_ref.get('name', '')
-                scope = var_ref.get('scope', '')
-                
-                if not ref_name or not scope:
-                    continue
-                    
-                # Find scope node
-                scope_node = None
-                for node in self.graph.nodes.values():
-                    if node.name == scope:
-                        scope_node = node
-                        break
-                        
-                if not scope_node:
-                    continue
-                    
-                # Find variable node
-                var_node = None
-                for node in self.graph.nodes.values():
-                    if node.name == ref_name and node.type == 'variable':
-                        var_node = node
-                        break
-                        
-                if not var_node:
-                    # Create variable node
-                    var_node = self.graph.add_node(
-                        name=ref_name,
-                        type='variable',
-                        file_path=context.path,
-                        start_line=var_ref.get('start_line', 0),
-                        end_line=var_ref.get('end_line', 0)
-                    )
-                    
-                # Create reference edge
-                self.graph.add_edge(
-                    scope_node,
-                    var_node,
-                    type=RelationType.REFERENCES,
-                    properties={
-                        'line_number': var_ref.get('start_line', 0),
-                        'scope': scope
-                    }
-                )
-                
-            # Process attribute references
-            for attr_ref in context.references.get('attributes', []):
-                ref_name = attr_ref.get('name', '')
-                scope = attr_ref.get('scope', '')
-                
-                if not ref_name or not scope:
-                    continue
-                    
-                # Find scope node
-                scope_node = None
-                for node in self.graph.nodes.values():
-                    if node.name == scope:
-                        scope_node = node
-                        break
-                        
-                if not scope_node:
-                    continue
-                    
-                # Find attribute node
-                attr_node = None
-                for node in self.graph.nodes.values():
-                    if node.name == ref_name and node.type == 'attribute':
-                        attr_node = node
-                        break
-                        
-                if not attr_node:
-                    # Create attribute node
-                    attr_node = self.graph.add_node(
-                        name=ref_name,
-                        type='attribute',
-                        file_path=context.path,
-                        start_line=attr_ref.get('start_line', 0),
-                        end_line=attr_ref.get('end_line', 0)
-                    )
-                    
-                # Create reference edge
-                self.graph.add_edge(
-                    scope_node,
-                    attr_node,
-                    type=RelationType.REFERENCES,
-                    properties={
-                        'line_number': attr_ref.get('start_line', 0),
-                        'scope': scope
-                    }
-                )
-                
-        except Exception as e:
-            logger.error(f"Failed to process references: {str(e)}")
-            raise
+        if not isinstance(context, FileContext):
+            raise ValueError("context must be a FileContext instance")
+
+        if not context.references:
+            return
+
+        # Process function calls
+        for call in context.references.get('calls', []):
+            if not isinstance(call, dict) or 'name' not in call or 'scope' not in call:
+                raise ValueError("Invalid function call format")
+
+            # Find or create caller node (scope)
+            caller_node = self.graph.find_or_create_node(
+                name=call['scope'],
+                type=NodeType.FUNCTION,
+                properties={
+                    'file_path': context.path,
+                    'start_line': call.get('start_line'),
+                    'end_line': call.get('end_line')
+                }
+            )
+
+            # Find or create called function node
+            called_node = self.graph.find_or_create_node(
+                name=call['name'],
+                type=NodeType.FUNCTION,
+                properties={
+                    'file_path': call.get('file_path', context.path),
+                    'start_line': call.get('start_line'),
+                    'end_line': call.get('end_line')
+                }
+            )
+
+            # Create edge for the function call
+            self.graph.create_edge(
+                from_node=caller_node,
+                to_node=called_node,
+                type=RelationType.CALLS,
+                properties={
+                    'line': call.get('start_line')
+                }
+            )
+
+        # Process attribute references
+        for attr in context.references.get('attributes', []):
+            if not isinstance(attr, dict) or 'name' not in attr or 'scope' not in attr:
+                raise ValueError("Invalid attribute reference format")
+
+            # Find or create scope node
+            scope_node = self.graph.find_or_create_node(
+                name=attr['scope'],
+                type=NodeType.CLASS if attr.get('is_class', False) else NodeType.FUNCTION,
+                properties={
+                    'file_path': context.path,
+                    'start_line': attr.get('start_line'),
+                    'end_line': attr.get('end_line')
+                }
+            )
+
+            # Find or create attribute node
+            attr_node = self.graph.find_or_create_node(
+                name=attr['name'],
+                type=NodeType.ATTRIBUTE,
+                properties={
+                    'file_path': attr.get('file_path', context.path),
+                    'start_line': attr.get('start_line'),
+                    'end_line': attr.get('end_line')
+                }
+            )
+
+            # Create edge for the attribute reference
+            self.graph.create_edge(
+                from_node=scope_node,
+                to_node=attr_node,
+                type=RelationType.REFERENCES,
+                properties={
+                    'line': attr.get('start_line')
+                }
+            )
