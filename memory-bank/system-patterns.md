@@ -120,72 +120,204 @@ server.py
 ## Implementation Patterns for AI Coding Agent Tools
 
 ### Code Understanding Tool
+
+#### Core Components
+
+1. CodeParser
 ```python
-class CodeAnalyzer:
-    """Core code analysis engine."""
+class CodeParser:
+    """Parses source code into syntax trees using tree-sitter."""
     
-    def __init__(self, target_path: str):
-        self.target_path = target_path
-        self.parsers = {}
-        self.register_parsers()
+    def __init__(self):
+        self.parser = None
+        self.language = None
         
-    def register_parsers(self):
-        """Register language-specific parsers."""
-        self.parsers = {
-            ".py": PythonParser(),
-            ".js": JavaScriptParser(),
-            ".ts": TypeScriptParser(),
-            # More languages...
-        }
-        
-    def analyze(self, depth: int = 2, include_external: bool = False) -> AnalysisResult:
-        """Analyze code at the specified path."""
-        result = AnalysisResult()
-        
-        # Find all files to analyze
-        files = self._find_files(include_external)
-        
-        # Parse files and extract symbols
-        for file_path in files:
-            extension = os.path.splitext(file_path)[1]
-            if extension in self.parsers:
-                parser = self.parsers[extension]
-                file_analysis = parser.parse(file_path)
-                result.add_file_analysis(file_analysis)
-        
-        # Build relationships up to specified depth
-        result.build_relationships(depth)
-        
-        return result
-    
-    def _find_files(self, include_external: bool) -> List[str]:
-        """Find files to analyze."""
-        # Implementation details...
+    def setup_language(self, language: str):
+        """Set up parser for a specific language."""
         pass
         
-class GraphBuilder:
-    """Builds relationship graphs from analysis results."""
+    def parse(self, source_code: str) -> Tree:
+        """Parse source code into a syntax tree."""
+        pass
+```
+
+2. CodeAnalyzer
+```python
+class CodeAnalyzer:
+    """Analyzes code using tree-sitter syntax trees."""
     
-    def __init__(self, analysis_result: AnalysisResult):
-        self.analysis_result = analysis_result
-        self.graph = nx.DiGraph()
+    def __init__(self):
+        self.reset_state()
         
-    def build(self) -> CodeGraph:
-        """Build a directed graph of code relationships."""
-        # Add nodes for all symbols
-        for symbol in self.analysis_result.symbols:
-            self.graph.add_node(symbol.id, **symbol.attributes)
+    def analyze_tree(self, tree: Tree) -> Dict[str, List[Dict[str, Any]]]:
+        """Analyze a syntax tree and extract code information."""
+        pass
         
-        # Add edges for relationships
-        for relationship in self.analysis_result.relationships:
-            self.graph.add_edge(
-                relationship.source_id,
-                relationship.target_id,
-                type=relationship.type,
-                **relationship.attributes
-            )
+    def _extract_imports(self, node: Node) -> List[Dict[str, Any]]:
+        """Extract import statements."""
+        pass
         
-        return CodeGraph(self.graph)
+    def _extract_functions(self, node: Node) -> List[Dict[str, Any]]:
+        """Extract function definitions."""
+        pass
+        
+    def _extract_classes(self, node: Node) -> List[Dict[str, Any]]:
+        """Extract class definitions."""
+        pass
+```
+
+3. SymbolExtractor
+```python
+class SymbolExtractor:
+    """Extracts symbols from syntax trees."""
+    
+    def __init__(self):
+        self.current_scope = None
+        self.symbols = {}
+        self.references = {}
+        
+    def extract_symbols(self, tree: Tree) -> Dict[str, Any]:
+        """Extract symbols from a syntax tree."""
+        pass
+        
+    def _process_node(self, node: Node, parent_scope: Optional[str] = None):
+        """Process a syntax tree node and extract symbols."""
+        pass
+```
+
+#### Design Patterns
+
+1. **Modular Architecture**
+   - Separate concerns into Parser, Analyzer, and Extractor
+   - Each component has a single responsibility
+   - Easy to extend and maintain
+
+2. **State Management**
+   - Components maintain internal state
+   - State is reset between operations
+   - Scope tracking for accurate symbol resolution
+
+3. **Error Handling**
+   - Comprehensive try-except blocks
+   - Detailed error logging
+   - Graceful fallbacks for failures
+
+4. **Visitor Pattern**
+   - Tree traversal using visitor pattern
+   - Node type-specific processing
+   - Maintains context during traversal
+
+5. **Builder Pattern**
+   - Incremental construction of analysis results
+   - Separate builders for different aspects
+   - Clean separation of building logic
+
+#### Data Structures
+
+1. **Syntax Tree**
+```python
+class Tree:
+    """Represents a syntax tree."""
+    def __init__(self, root_node: Node):
+        self.root_node = root_node
+```
+
+2. **Node**
+```python
+class Node:
+    """Represents a syntax tree node."""
+    def __init__(self, type: str, text: str = "", children: List["Node"] = None):
+        self.type = type
+        self.text = text
+        self.children = children or []
+```
+
+3. **Symbol Table**
+```python
+SymbolTable = Dict[str, Dict[str, Any]]
+"""
+{
+    'symbol_name': {
+        'type': str,  # 'function', 'class', 'variable', 'import'
+        'scope': str,  # Scope where symbol is defined
+        'start': Tuple[int, int],  # Start position
+        'end': Tuple[int, int],  # End position
+        'params': List[str],  # For functions
+        'bases': List[str],  # For classes
+    }
+}
+"""
+```
+
+4. **Reference Table**
+```python
+ReferenceTable = Dict[str, List[Dict[str, Any]]]
+"""
+{
+    'symbol_name': [
+        {
+            'scope': str,  # Scope where reference occurs
+            'start': Tuple[int, int],  # Start position
+            'end': Tuple[int, int],  # End position
+        }
+    ]
+}
+"""
+```
+
+#### Future Extensions
+
+1. **Language Support**
+```python
+class LanguageParser:
+    """Base class for language-specific parsers."""
+    
+    def parse(self, source: str) -> Tree:
+        """Parse source code into a syntax tree."""
+        pass
+
+class PythonParser(LanguageParser):
+    """Python-specific parser implementation."""
+    pass
+
+class JavaScriptParser(LanguageParser):
+    """JavaScript-specific parser implementation."""
+    pass
+```
+
+2. **Relationship Graph**
+```python
+class RelationshipGraph:
+    """Builds and manages code relationship graphs."""
+    
+    def __init__(self):
+        self.nodes = {}
+        self.edges = []
+        
+    def add_relationship(self, source: str, target: str, type: str):
+        """Add a relationship between symbols."""
+        pass
+        
+    def get_dependencies(self, symbol: str) -> List[str]:
+        """Get dependencies for a symbol."""
+        pass
+```
+
+3. **Semantic Mapper**
+```python
+class SemanticMapper:
+    """Maps code to semantic representations."""
+    
+    def __init__(self, model: str = "default"):
+        self.model = model
+        
+    def embed_code(self, code: str) -> np.ndarray:
+        """Generate embeddings for code."""
+        pass
+        
+    def find_similar(self, query: str, threshold: float = 0.8) -> List[str]:
+        """Find semantically similar code."""
+        pass
 ```
 
 ### Intelligent Refactoring Tool

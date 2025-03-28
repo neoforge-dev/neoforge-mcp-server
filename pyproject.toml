@@ -10,7 +10,11 @@ dependencies = [
     "opentelemetry-exporter-otlp>=1.31.1",
     "opentelemetry-sdk>=1.31.1",
     "psutil>=7.0.0",
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.1",
     "PyYAML>=6.0.1",
+    "tree-sitter>=0.24.0",
 ]
 
 [project.optional-dependencies]
@@ -50,3 +54,8 @@ exclude_lines = [
     "raise ImportError",
 ]
 fail_under = 90
+
+[dependency-groups]
+dev = [
+    "tree-sitter>=0.24.0",
+]

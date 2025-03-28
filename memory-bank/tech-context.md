@@ -1183,3 +1183,149 @@ journalctl -u traefik
 # Restart MCP server
 kill -9 PID && cd /path/to/server && . .venv/bin/activate && mcp dev server.py &
 ```
+
+## Development Environment
+
+### Language & Runtime
+- Python 3.13.0
+- Virtual environment management with venv
+- Package management with pip
+
+### Dependencies
+- tree-sitter: Language-agnostic parser
+- pytest: Testing framework
+- pytest-cov: Coverage reporting
+- logging: Standard library logging
+
+### Development Tools
+- VSCode/Cursor as primary IDE
+- Git for version control
+- pytest for testing
+- Coverage.py for test coverage
+
+## Project Structure
+
+### Core Directories
+```
+server/
+├── code_understanding/
+│   ├── __init__.py
+│   ├── parser.py
+│   ├── analyzer.py
+│   ├── extractor.py
+│   ├── symbols.py
+│   └── build_languages.py
+├── core.py
+└── llm.py
+
+tests/
+├── __init__.py
+└── test_parser.py
+
+memory-bank/
+├── project-brief.md
+├── product-context.md
+├── active-context.md
+├── system-patterns.md
+├── tech-context.md
+└── progress.md
+```
+
+### Key Files
+- `parser.py`: Code parsing with tree-sitter
+- `analyzer.py`: Syntax tree analysis
+- `extractor.py`: Symbol extraction
+- `symbols.py`: Symbol management
+- `build_languages.py`: Tree-sitter language building
+
+## Technical Constraints
+
+### Performance
+- Memory usage for large codebases
+- Parse time for large files
+- Graph traversal efficiency
+- Cache management
+
+### Security
+- Code execution safety
+- Input validation
+- Resource limits
+- Access control
+
+### Scalability
+- Incremental analysis
+- Parallel processing
+- Resource management
+- Cache invalidation
+
+## Integration Points
+
+### Tree-sitter
+- Language-agnostic parsing
+- Syntax tree generation
+- Language support management
+- Error handling
+
+### MCP Interface
+- Command handling
+- Response formatting
+- Error reporting
+- State management
+
+### Testing Framework
+- Unit tests
+- Integration tests
+- Coverage reporting
+- Performance testing
+
+## Development Practices
+
+### Code Style
+- PEP 8 compliance
+- Type hints
+- Comprehensive docstrings
+- Clear error messages
+
+### Testing
+- Unit tests for components
+- Integration tests for workflows
+- Coverage targets (>80%)
+- Performance benchmarks
+
+### Documentation
+- Inline documentation
+- API documentation
+- Usage examples
+- Architecture docs
+
+### Version Control
+- Feature branches
+- Pull requests
+- Code review
+- Version tagging
+
+## Future Considerations
+
+### Language Support
+- Additional tree-sitter parsers
+- Language-specific analysis
+- Custom parsing rules
+- Language detection
+
+### Performance Optimization
+- Caching strategies
+- Parallel processing
+- Memory management
+- Resource pooling
+
+### Tool Integration
+- IDE plugins
+- CI/CD integration
+- API endpoints
+- Monitoring tools
+
+### Scalability
+- Distributed processing
+- Load balancing
+- Resource scaling
+- Data partitioning
