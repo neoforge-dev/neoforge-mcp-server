@@ -1018,31 +1018,69 @@ The API consists of tool functions that can be invoked remotely:
 
 ## Implementation Details
 
-### Code Generation
-```python
-@mcp.tool()
-def generate_code(
-    prompt: str,
-    model: str = "claude-3-sonnet",
-    language: str = "python",
-    context: Optional[Dict] = None,
-    system_prompt: Optional[str] = None,
-    max_tokens: Optional[int] = None,
-    temperature: float = 0.7
-) -> Dict[str, Any]:
-    """Generate code using specified model"""
-```
+### Relationship Builder
+- **Core Components**
+  - `Graph`: Base data structure for storing nodes and edges
+  - `Node`: Represents code elements (functions, classes, variables)
+  - `Edge`: Represents relationships between nodes
+  - `RelationType`: Enum for relationship types
+  - `RelationshipBuilder`: Main class for building relationships
 
-### Code Validation
-```python
-@mcp.tool()
-def validate_code_quality(
-    code: str,
-    language: str = "python",
-    checks: Optional[List[str]] = None
-) -> Dict[str, Any]:
-    """Validate generated code quality"""
-```
+- **Node Types**
+  - `function`: Function definitions
+  - `method`: Class methods
+  - `class`: Class definitions
+  - `variable`: Variables and parameters
+  - `module`: Imported modules
+  - `import`: Imported symbols
+  - `attribute`: Class attributes
+
+- **Relationship Types**
+  - `CONTAINS`: Parent-child relationships
+  - `CALLS`: Function/method calls
+  - `INHERITS`: Class inheritance
+  - `IMPORTS`: Module imports
+  - `REFERENCES`: Variable/attribute references
+
+### Current Implementation Status
+- **Working Features**
+  - Basic graph operations (add/remove nodes/edges)
+  - Node and edge property management
+  - Relationship type handling
+  - Test infrastructure
+
+- **In Progress**
+  - Reference extraction and processing
+  - Scope management
+  - Error handling improvements
+  - Test coverage expansion
+
+- **Known Issues**
+  - Node creation during file analysis
+  - Edge creation for references
+  - Directory analysis completeness
+  - Test coverage gaps
+
+### Technical Debt
+1. **Error Handling**
+   - Need more comprehensive error types
+   - Better error recovery mechanisms
+   - Improved error logging
+
+2. **Validation**
+   - Input validation for node/edge creation
+   - Relationship validation rules
+   - Property validation
+
+3. **Testing**
+   - More edge case coverage
+   - Error handling tests
+   - Integration tests
+
+4. **Documentation**
+   - API documentation
+   - Usage examples
+   - Error handling guide
 
 ## Architecture Patterns
 
@@ -1329,3 +1367,288 @@ memory-bank/
 - Load balancing
 - Resource scaling
 - Data partitioning
+
+# Technical Context
+
+## Technology Stack
+
+### Core Technologies
+1. **Python 3.13**
+   - Main implementation language
+   - Type hints support
+   - Async/await support
+   - Performance improvements
+
+2. **Tree-sitter**
+   - Code parsing
+   - Language support
+   - Incremental parsing
+   - Error recovery
+
+3. **FastAPI**
+   - REST API
+   - WebSocket support
+   - OpenAPI documentation
+   - Performance optimization
+
+### Language Support
+1. **Python**
+   - Tree-sitter Python grammar
+   - Type hints
+   - Decorators
+   - Async/await
+
+2. **JavaScript**
+   - Tree-sitter JavaScript grammar
+   - ES6+ features
+   - Modules
+   - TypeScript support
+
+3. **Swift**
+   - Tree-sitter Swift grammar
+   - Type system
+   - Protocols
+   - Extensions
+
+### Analysis Tools
+1. **Static Analysis**
+   - Type inference
+   - Control flow analysis
+   - Data flow analysis
+   - Symbol resolution
+
+2. **Graph Processing**
+   - NetworkX
+   - Graph visualization
+   - Query optimization
+   - Path analysis
+
+3. **Performance Tools**
+   - Profiling
+   - Memory tracking
+   - Cache analysis
+   - Resource monitoring
+
+## Development Setup
+
+### Environment
+1. **Python Environment**
+   - Virtual environment
+   - Dependency management
+   - Development tools
+   - Testing framework
+
+2. **Language Support**
+   - Tree-sitter setup
+   - Grammar compilation
+   - Language detection
+   - Cross-language testing
+
+3. **Analysis Tools**
+   - Static analysis setup
+   - Graph processing
+   - Performance tools
+   - Visualization tools
+
+### Dependencies
+1. **Core Dependencies**
+   - tree-sitter
+   - fastapi
+   - pydantic
+   - networkx
+
+2. **Language Dependencies**
+   - tree-sitter-python
+   - tree-sitter-javascript
+   - tree-sitter-swift
+   - language-specific tools
+
+3. **Analysis Dependencies**
+   - type inference tools
+   - flow analysis tools
+   - graph processing tools
+   - visualization tools
+
+### Development Tools
+1. **Code Quality**
+   - Linters
+   - Formatters
+   - Type checkers
+   - Security scanners
+
+2. **Testing Tools**
+   - Unit testing
+   - Integration testing
+   - Performance testing
+   - Coverage tools
+
+3. **Documentation Tools**
+   - API documentation
+   - Architecture docs
+   - User guides
+   - Examples
+
+## Technical Constraints
+
+### Performance Requirements
+1. **Response Time**
+   - API endpoints < 100ms
+   - Analysis < 1s per file
+   - Graph queries < 50ms
+   - Cache hits < 10ms
+
+2. **Resource Usage**
+   - Memory < 1GB per analysis
+   - CPU < 80% utilization
+   - Disk < 10GB cache
+   - Network < 100MB/s
+
+3. **Scalability**
+   - Support 100k+ files
+   - Handle multiple languages
+   - Process large graphs
+   - Concurrent analysis
+
+### Language Support
+1. **Python Features**
+   - Type hints
+   - Decorators
+   - Async/await
+   - Metaclasses
+
+2. **JavaScript Features**
+   - ES6+ syntax
+   - Modules
+   - Classes
+   - Promises
+
+3. **Swift Features**
+   - Type system
+   - Protocols
+   - Extensions
+   - Generics
+
+### Analysis Capabilities
+1. **Static Analysis**
+   - Type inference
+   - Control flow
+   - Data flow
+   - Symbol resolution
+
+2. **Graph Analysis**
+   - Node relationships
+   - Edge types
+   - Path finding
+   - Cycle detection
+
+3. **Performance Analysis**
+   - Memory usage
+   - CPU usage
+   - I/O patterns
+   - Cache efficiency
+
+## Testing Requirements
+
+### Unit Testing
+1. **Parser Tests**
+   - Syntax parsing
+   - Error handling
+   - Edge cases
+   - Performance
+
+2. **Analyzer Tests**
+   - Symbol extraction
+   - Type inference
+   - Flow analysis
+   - Context tracking
+
+3. **Graph Tests**
+   - Node creation
+   - Edge creation
+   - Relationships
+   - Queries
+
+### Integration Testing
+1. **Cross-language Tests**
+   - Multi-language projects
+   - Reference resolution
+   - Type compatibility
+   - Performance impact
+
+2. **End-to-end Tests**
+   - Complete pipeline
+   - Large codebases
+   - Real scenarios
+   - Benchmarks
+
+### Performance Testing
+1. **Scalability Tests**
+   - Large projects
+   - Multiple languages
+   - Complex graphs
+   - Resource usage
+
+2. **Optimization Tests**
+   - Caching
+   - Incremental analysis
+   - Parallel processing
+   - Resource efficiency
+
+## Documentation Requirements
+
+### API Documentation
+1. **Endpoints**
+   - REST API
+   - WebSocket
+   - Graph queries
+   - Analysis options
+
+2. **Data Models**
+   - Request/response
+   - Graph structure
+   - Analysis results
+   - Error types
+
+3. **Usage Examples**
+   - Basic usage
+   - Advanced features
+   - Performance tips
+   - Troubleshooting
+
+### Architecture Documentation
+1. **Components**
+   - Parser layer
+   - Analyzer layer
+   - Semantic layer
+   - Graph layer
+
+2. **Design Patterns**
+   - Language support
+   - Analysis patterns
+   - Testing patterns
+   - Error handling
+
+3. **Implementation Guide**
+   - Setup guide
+   - Development guide
+   - Testing guide
+   - Deployment guide
+
+### User Documentation
+1. **Getting Started**
+   - Installation
+   - Configuration
+   - Basic usage
+   - Examples
+
+2. **Advanced Usage**
+   - Language support
+   - Analysis options
+   - Graph queries
+   - Performance tuning
+
+3. **Troubleshooting**
+   - Common issues
+   - Error messages
+   - Performance problems
+   - Solutions

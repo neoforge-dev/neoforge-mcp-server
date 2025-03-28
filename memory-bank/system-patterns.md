@@ -879,4 +879,498 @@ def tool_name(param1: Type1, param2: Type2 = default) -> Dict[str, Any]:
 - **Resource Management**: Automatic cleanup of temporary files
 - **State Handling**: Clear state transitions in profiling sessions
 - **Data Access**: Structured access to profiling statistics
-- **Tool Integration**: Non-intrusive profiling of existing tools 
+- **Tool Integration**: Non-intrusive profiling of existing tools
+
+## Code Understanding Tool Architecture
+
+The Code Understanding Tool follows a layered architecture with the following components:
+
+### Parser Layer
+- **CodeParser** (`parser.py`)
+  - Handles code parsing using tree-sitter (with fallback to AST)
+  - Provides a unified interface for accessing syntax trees
+  - Abstracts away differences between tree-sitter and AST
+  - Uses mock objects for testing when tree-sitter is unavailable
+
+### Analyzer Layer
+- **CodeAnalyzer** (`analyzer.py`)
+  - Extracts high-level code structures (imports, functions, classes, variables)
+  - Provides a simplified view of code for quick analysis
+  - Focuses on structural elements rather than detailed semantics
+
+### Symbol Extraction Layer
+- **SymbolExtractor** (`symbols.py` and `extractor.py`)
+  - Extracts detailed symbol information from syntax trees
+  - Handles scoping rules for proper symbol resolution
+  - Tracks symbol references for relationship building
+  - Maintains a scope hierarchy during tree traversal
+
+### Relationship Graph Layer (Planned)
+- **RelationshipExtractor** (`relationships.py`)
+  - Identifies relationships between symbols (calls, inherits, imports, etc.)
+  - Builds a graph representation of code relationships
+  - Supports queries for finding dependencies and impacts
+
+### Graph Representation Layer (Planned)
+- **CodeGraph** (`graph.py`)
+  - Provides a graph data structure for representing code relationships
+  - Supports queries for navigating the code structure
+  - Enables visualization and export capabilities
+
+## Design Patterns
+
+The Code Understanding Tool uses several design patterns:
+
+1. **Visitor Pattern**
+   - Tree traversal via `_process_node` methods
+   - Node-specific processing methods for different node types
+   - Maintains context during traversal (scope, etc.)
+
+2. **Strategy Pattern**
+   - Different strategies for processing different node types
+   - Allows for language-specific extensions
+
+3. **Composite Pattern**
+   - Tree structure representation of code
+   - Uniform interface for working with nodes
+
+4. **Adapter Pattern**
+   - Tree-sitter to internal representation adaptation
+   - AST to internal representation adaptation
+   - Mock objects for testing
+
+5. **Factory Method**
+   - Creating appropriate node handlers based on node type
+   - Extensible for new languages or node types
+
+## Error Handling Pattern
+
+The code follows a consistent error handling approach:
+
+1. Top-level methods have try-except blocks
+2. Errors are logged with appropriate context
+3. Fallback values are provided to maintain system stability
+4. Error information is propagated to the caller for informed decisions
+5. Custom error types for specific error scenarios
+
+## Testing Strategy
+
+The testing approach includes:
+
+1. Mocking syntax trees for deterministic testing
+2. Unit tests for individual components
+3. Integration tests for end-to-end functionality
+4. Error handling tests to ensure robustness
+5. Parameterized tests for language-specific behavior
+
+## Relationship Builder Patterns
+
+### Node Creation Pattern
+```python
+def create_node(self, name: str, type: str, context: Context) -> Node:
+    """Create a node with proper context and validation."""
+    # Check if node already exists
+    existing = self._find_existing_node(name, type)
+    if existing:
+        return existing
+        
+    # Create new node with context
+    node = Node(
+        name=name,
+        type=type,
+        file_path=context.file_path,
+        start_line=context.start_line,
+        end_line=context.end_line,
+        properties=context.properties
+    )
+    
+    # Validate and store
+    self._validate_node(node)
+    self._store_node(node)
+    return node
+```
+
+### Edge Creation Pattern
+```python
+def create_edge(self, source: Node, target: Node, type: RelationType, context: Context) -> Edge:
+    """Create an edge with proper validation and properties."""
+    # Validate nodes exist
+    if not self._node_exists(source) or not self._node_exists(target):
+        raise ValueError("Source or target node does not exist")
+        
+    # Create edge with context
+    edge = Edge(
+        source=source,
+        target=target,
+        type=type,
+        properties={
+            'line_number': context.line_number,
+            'scope': context.scope
+        }
+    )
+    
+    # Validate and store
+    self._validate_edge(edge)
+    self._store_edge(edge)
+    return edge
+```
+
+### Reference Processing Pattern
+```python
+def process_reference(self, ref: Reference, context: Context) -> None:
+    """Process a code reference with proper scoping."""
+    try:
+        # Find or create nodes
+        source_node = self._get_scope_node(ref.scope)
+        target_node = self._get_target_node(ref.name, ref.type)
+        
+        # Create relationship
+        self.create_edge(
+            source=source_node,
+            target=target_node,
+            type=self._get_relation_type(ref),
+            context=context
+        )
+    except Exception as e:
+        self._handle_reference_error(e, ref)
+```
+
+### Error Handling Pattern
+```python
+def _handle_reference_error(self, error: Exception, ref: Reference) -> None:
+    """Handle errors during reference processing."""
+    logger.error(f"Failed to process reference {ref.name}: {str(error)}")
+    
+    if isinstance(error, NodeNotFoundError):
+        # Create placeholder node
+        self._create_placeholder_node(ref)
+    elif isinstance(error, ValidationError):
+        # Log validation failure
+        self._log_validation_failure(error)
+    else:
+        # Unexpected error
+        raise ProcessingError(f"Failed to process reference: {str(error)}")
+```
+
+### Validation Patterns
+
+1. **Node Validation**
+```python
+def _validate_node(self, node: Node) -> None:
+    """Validate node properties and relationships."""
+    if not node.name:
+        raise ValidationError("Node must have a name")
+        
+    if not node.type:
+        raise ValidationError("Node must have a type")
+        
+    if node.type not in VALID_NODE_TYPES:
+        raise ValidationError(f"Invalid node type: {node.type}")
+```
+
+2. **Edge Validation**
+```python
+def _validate_edge(self, edge: Edge) -> None:
+    """Validate edge properties and relationships."""
+    if not edge.source or not edge.target:
+        raise ValidationError("Edge must have source and target")
+        
+    if edge.type not in RelationType:
+        raise ValidationError(f"Invalid edge type: {edge.type}")
+        
+    if edge.source.id == edge.target.id:
+        raise ValidationError("Self-referential edges not allowed")
+```
+
+### Testing Patterns
+
+1. **Fixture Pattern**
+```python
+@pytest.fixture
+def sample_context():
+    """Create a test context with common test data."""
+    return Context(
+        file_path="test.py",
+        start_line=1,
+        end_line=10,
+        scope="global",
+        properties={}
+    )
+```
+
+2. **Test Case Pattern**
+```python
+def test_process_reference(builder, sample_context):
+    """Test reference processing with validation."""
+    # Arrange
+    ref = Reference(name="test", type="call", scope="main")
+    
+    # Act
+    builder.process_reference(ref, sample_context)
+    
+    # Assert
+    graph = builder.get_relationships()
+    assert len(graph.nodes) > 0
+    assert len(graph.edges) > 0
+    
+    # Verify relationships
+    edge = next(iter(graph.edges))
+    assert edge.source.name == "main"
+    assert edge.target.name == "test"
+    assert edge.type == RelationType.CALLS
+```
+
+## Architecture Overview
+
+### Core Components
+1. **Parser Layer**
+   - Language-specific parsers (Python, JavaScript, Swift)
+   - Tree-sitter integration
+   - Abstract syntax tree (AST) generation
+   - Error handling and recovery
+
+2. **Analyzer Layer**
+   - Code structure analysis
+   - Symbol extraction
+   - Type inference
+   - Control flow analysis
+   - Data flow analysis
+
+3. **Semantic Layer**
+   - Type system
+   - Context tracking
+   - Symbol resolution
+   - Cross-language references
+   - Impact analysis
+
+4. **Graph Layer**
+   - Relationship building
+   - Graph representation
+   - Query interface
+   - Visualization support
+
+## Design Patterns
+
+### Language Support Patterns
+1. **Adapter Pattern**
+   - Language-specific parser adapters
+   - Unified AST representation
+   - Common symbol interface
+   - Cross-language type mapping
+
+2. **Strategy Pattern**
+   - Language-specific analysis strategies
+   - Parser selection strategy
+   - Type inference strategy
+   - Reference resolution strategy
+
+3. **Factory Pattern**
+   - Language-specific component creation
+   - Parser factory
+   - Analyzer factory
+   - Graph factory
+
+### Semantic Analysis Patterns
+1. **Visitor Pattern**
+   - AST traversal
+   - Type inference
+   - Control flow analysis
+   - Data flow analysis
+
+2. **Observer Pattern**
+   - Analysis progress tracking
+   - Error reporting
+   - Performance monitoring
+   - Cache invalidation
+
+3. **Builder Pattern**
+   - Semantic graph construction
+   - Type system building
+   - Context building
+   - Relationship building
+
+### Testing Patterns
+1. **Mock Pattern**
+   - Parser mocking
+   - File system mocking
+   - Cache mocking
+   - Performance mocking
+
+2. **Factory Pattern**
+   - Test data generation
+   - Mock object creation
+   - Test scenario building
+   - Performance test setup
+
+3. **Strategy Pattern**
+   - Test execution strategy
+   - Coverage strategy
+   - Performance strategy
+   - Language-specific test strategy
+
+## Implementation Guidelines
+
+### Language Support
+1. **Parser Implementation**
+   - Use tree-sitter for all languages
+   - Implement language detection
+   - Create unified AST representation
+   - Handle language-specific errors
+
+2. **Symbol Extraction**
+   - Language-specific scope rules
+   - Cross-language references
+   - Type information extraction
+   - Context preservation
+
+3. **Type System**
+   - Language-specific type rules
+   - Type inference algorithms
+   - Type compatibility checking
+   - Cross-language type mapping
+
+### Semantic Analysis
+1. **Control Flow**
+   - CFG construction
+   - Path analysis
+   - Reachability analysis
+   - Dead code detection
+
+2. **Data Flow**
+   - Variable tracking
+   - Value propagation
+   - Use-def chains
+   - Live variable analysis
+
+3. **Context Analysis**
+   - Scope tracking
+   - Symbol resolution
+   - Type context
+   - Call context
+
+## Testing Strategy
+
+### Unit Testing
+1. **Parser Tests**
+   - Language-specific syntax
+   - Error handling
+   - Edge cases
+   - Performance
+
+2. **Analyzer Tests**
+   - Symbol extraction
+   - Type inference
+   - Control flow
+   - Data flow
+
+3. **Graph Tests**
+   - Node creation
+   - Edge creation
+   - Relationship building
+   - Query interface
+
+### Integration Testing
+1. **Cross-language Tests**
+   - Multi-language projects
+   - Reference resolution
+   - Type compatibility
+   - Performance impact
+
+2. **End-to-end Tests**
+   - Complete analysis pipeline
+   - Large codebases
+   - Real-world scenarios
+   - Performance benchmarks
+
+### Performance Testing
+1. **Scalability Tests**
+   - Large codebases
+   - Multiple languages
+   - Complex relationships
+   - Memory usage
+
+2. **Optimization Tests**
+   - Caching effectiveness
+   - Incremental analysis
+   - Parallel processing
+   - Resource utilization
+
+## Error Handling
+
+### Error Types
+1. **Parser Errors**
+   - Syntax errors
+   - Grammar errors
+   - File access errors
+   - Encoding errors
+
+2. **Analysis Errors**
+   - Type errors
+   - Scope errors
+   - Reference errors
+   - Context errors
+
+3. **Graph Errors**
+   - Node errors
+   - Edge errors
+   - Cycle errors
+   - Query errors
+
+### Recovery Strategies
+1. **Parser Recovery**
+   - Error location
+   - Partial parsing
+   - Error reporting
+   - Recovery suggestions
+
+2. **Analysis Recovery**
+   - Partial analysis
+   - Error isolation
+   - Context preservation
+   - Incremental updates
+
+3. **Graph Recovery**
+   - Partial graph
+   - Error isolation
+   - State preservation
+   - Incremental updates
+
+## Performance Considerations
+
+### Optimization Strategies
+1. **Caching**
+   - Parse results
+   - Analysis results
+   - Graph state
+   - Type information
+
+2. **Incremental Analysis**
+   - Changed files
+   - Affected symbols
+   - Updated relationships
+   - Modified types
+
+3. **Parallel Processing**
+   - File parsing
+   - Symbol analysis
+   - Graph building
+   - Type inference
+
+### Resource Management
+1. **Memory Usage**
+   - AST size
+   - Graph size
+   - Cache size
+   - Temporary objects
+
+2. **CPU Usage**
+   - Parse time
+   - Analysis time
+   - Graph time
+   - Query time
+
+3. **I/O Usage**
+   - File access
+   - Cache access
+   - Graph storage
+   - Result output 

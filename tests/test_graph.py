@@ -1,257 +1,280 @@
-"""Tests for the relationship graph implementation."""
+"""Tests for the graph data structure."""
 
 import pytest
-from server.code_understanding.graph import (
-    RelationType, Node, Edge, RelationshipGraph
-)
+from server.code_understanding.graph import Graph, Node, Edge, RelationType
 
 @pytest.fixture
-def sample_nodes():
-    """Create sample nodes for testing."""
-    return [
-        Node(
-            id="class1",
-            type="class",
-            name="MyClass",
-            file="test.py",
-            start=(1, 0),
-            end=(10, 0)
-        ),
-        Node(
-            id="method1",
-            type="method",
-            name="my_method",
-            file="test.py",
-            start=(2, 4),
-            end=(4, 4)
-        ),
-        Node(
-            id="func1",
-            type="function",
-            name="helper_func",
-            file="test.py",
-            start=(12, 0),
-            end=(15, 0)
-        )
-    ]
-
-@pytest.fixture
-def sample_graph(sample_nodes):
+def sample_graph():
     """Create a sample graph for testing."""
-    graph = RelationshipGraph()
+    graph = Graph()
     
-    # Add nodes
-    for node in sample_nodes:
-        graph.add_node(node)
+    # Add some nodes
+    node1 = graph.add_node(
+        name="test_function",
+        type="function",
+        file_path="test.py",
+        start_line=10,
+        end_line=20,
+        properties={"visibility": "public"}
+    )
     
-    # Add edges
-    graph.add_edge(Edge(
-        source=sample_nodes[0],  # class1
-        target=sample_nodes[1],  # method1
-        type=RelationType.CONTAINS
-    ))
-    graph.add_edge(Edge(
-        source=sample_nodes[1],  # method1
-        target=sample_nodes[2],  # func1
-        type=RelationType.CALLS
-    ))
+    node2 = graph.add_node(
+        name="test_class",
+        type="class",
+        file_path="test.py",
+        start_line=30,
+        end_line=40,
+        properties={"visibility": "public"}
+    )
     
-    return graph
+    # Add an edge
+    graph.add_edge(
+        source=node1,
+        target=node2,
+        type=RelationType.CALLS,
+        properties={"line_number": 15}
+    )
+    
+    return graph, node1, node2
 
 def test_node_creation():
-    """Test node creation and properties."""
-    node = Node(
-        id="test1",
-        type="class",
-        name="TestClass",
-        file="test.py",
-        start=(1, 0),
-        end=(10, 0),
+    """Test creating and retrieving nodes in the graph."""
+    graph = Graph()
+    
+    # Test node creation
+    node = graph.add_node(
+        name="test_function",
+        type="function",
+        file_path="test.py",
+        start_line=10,
+        end_line=20,
         properties={"visibility": "public"}
     )
     
-    assert node.id == "test1"
-    assert node.type == "class"
-    assert node.name == "TestClass"
-    assert node.file == "test.py"
-    assert node.start == (1, 0)
-    assert node.end == (10, 0)
-    assert node.properties["visibility"] == "public"
+    # Verify node properties
+    assert node.name == "test_function"
+    assert node.type == "function"
+    assert node.file_path == "test.py"
+    assert node.start_line == 10
+    assert node.end_line == 20
+    assert node.properties == {"visibility": "public"}
+    
+    # Test node retrieval
+    retrieved_node = graph.get_node(node.id)
+    assert retrieved_node == node
+    
+    # Test retrieval by type
+    nodes_by_type = graph.get_nodes_by_type("function")
+    assert len(nodes_by_type) == 1
+    assert nodes_by_type[0] == node
 
 def test_edge_creation():
-    """Test edge creation and properties."""
-    source = Node(
-        id="source",
-        type="class",
-        name="Source",
-        file="test.py",
-        start=(1, 0),
-        end=(5, 0)
-    )
-    target = Node(
-        id="target",
-        type="class",
-        name="Target",
-        file="test.py",
-        start=(7, 0),
-        end=(12, 0)
-    )
-    edge = Edge(
-        source=source,
-        target=target,
-        type=RelationType.INHERITS,
-        properties={"visibility": "public"}
+    """Test creating and retrieving edges in the graph."""
+    graph = Graph()
+    
+    # Create nodes
+    node1 = graph.add_node(name="source", type="function", file_path="test.py")
+    node2 = graph.add_node(name="target", type="function", file_path="test.py")
+    
+    # Create edge
+    edge = graph.add_edge(
+        source=node1,
+        target=node2,
+        type=RelationType.CALLS,
+        properties={"line_number": 15}
     )
     
-    assert edge.source == source
-    assert edge.target == target
-    assert edge.type == RelationType.INHERITS
-    assert edge.properties["visibility"] == "public"
+    # Verify edge properties
+    assert edge.source == node1
+    assert edge.target == node2
+    assert edge.type == RelationType.CALLS
+    assert edge.properties == {"line_number": 15}
+    
+    # Test edge retrieval
+    edges = graph.get_edges(source_id=node1.id)
+    assert len(edges) == 1
+    assert edges[0] == edge
+    
+    edges = graph.get_edges(target_id=node2.id)
+    assert len(edges) == 1
+    assert edges[0] == edge
+    
+    edges = graph.get_edges(rel_type=RelationType.CALLS)
+    assert len(edges) == 1
+    assert edges[0] == edge
 
-def test_graph_add_node(sample_nodes):
-    """Test adding nodes to the graph."""
-    graph = RelationshipGraph()
+def test_edge_filtering():
+    """Test filtering edges with multiple criteria."""
+    graph = Graph()
     
-    # Add first node
-    graph.add_node(sample_nodes[0])
-    assert sample_nodes[0].id in graph.nodes
+    # Create nodes
+    node1 = graph.add_node(name="source", type="function", file_path="test.py")
+    node2 = graph.add_node(name="target", type="function", file_path="test.py")
+    node3 = graph.add_node(name="other", type="function", file_path="test.py")
+    
+    # Create edges
+    edge1 = graph.add_edge(
+        source=node1,
+        target=node2,
+        type=RelationType.CALLS,
+        properties={"line_number": 15}
+    )
+    
+    edge2 = graph.add_edge(
+        source=node2,
+        target=node3,
+        type=RelationType.REFERENCES,
+        properties={"line_number": 20}
+    )
+    
+    # Test filtering by source and type
+    edges = graph.get_edges(source_id=node1.id, rel_type=RelationType.CALLS)
+    assert len(edges) == 1
+    assert edges[0] == edge1
+    
+    # Test filtering by target and type
+    edges = graph.get_edges(target_id=node2.id, rel_type=RelationType.CALLS)
+    assert len(edges) == 1
+    assert edges[0] == edge1
+    
+    # Test filtering with no matches
+    edges = graph.get_edges(source_id=node1.id, rel_type=RelationType.REFERENCES)
+    assert len(edges) == 0
+
+def test_node_filtering():
+    """Test filtering nodes by type and file."""
+    graph = Graph()
+    
+    # Create nodes
+    node1 = graph.add_node(name="func1", type="function", file_path="test.py")
+    node2 = graph.add_node(name="func2", type="function", file_path="test.py")
+    node3 = graph.add_node(name="class1", type="class", file_path="test.py")
+    node4 = graph.add_node(name="func3", type="function", file_path="other.py")
+    
+    # Test filtering by type
+    function_nodes = graph.get_nodes_by_type("function")
+    assert len(function_nodes) == 3
+    assert all(n.type == "function" for n in function_nodes)
+    
+    class_nodes = graph.get_nodes_by_type("class")
+    assert len(class_nodes) == 1
+    assert class_nodes[0] == node3
+    
+    # Test filtering by file
+    test_nodes = graph.get_nodes_by_file("test.py")
+    assert len(test_nodes) == 3
+    assert all(n.file_path == "test.py" for n in test_nodes)
+    
+    other_nodes = graph.get_nodes_by_file("other.py")
+    assert len(other_nodes) == 1
+    assert other_nodes[0] == node4
+
+def test_duplicate_node_handling():
+    """Test handling of duplicate node creation."""
+    graph = Graph()
+    
+    # Create initial node
+    node1 = graph.add_node(
+        name="test_function",
+        type="function",
+        file_path="test.py"
+    )
+    
+    # Try to create duplicate node
+    node2 = graph.add_node(
+        name="test_function",
+        type="function",
+        file_path="test.py"
+    )
+    
+    # Verify same node is returned
+    assert node1 == node2
     assert len(graph.nodes) == 1
-    
-    # Add same node again (should update)
-    graph.add_node(sample_nodes[0])
-    assert len(graph.nodes) == 1
-    
-    # Add second node
-    graph.add_node(sample_nodes[1])
-    assert len(graph.nodes) == 2
 
-def test_graph_add_edge(sample_nodes):
-    """Test adding edges to the graph."""
-    graph = RelationshipGraph()
+def test_clear_graph():
+    """Test clearing the graph."""
+    graph = Graph()
     
-    edge = Edge(
-        source=sample_nodes[0],
-        target=sample_nodes[1],
-        type=RelationType.CONTAINS
-    )
-    
-    # Add edge (should also add nodes)
-    graph.add_edge(edge)
-    assert edge in graph.edges
-    assert len(graph.edges) == 1
-    assert len(graph.nodes) == 2
-    assert edge in graph.outgoing[sample_nodes[0].id]
-    assert edge in graph.incoming[sample_nodes[1].id]
-
-def test_graph_remove_node(sample_graph, sample_nodes):
-    """Test removing nodes from the graph."""
-    # Remove middle node (method1)
-    sample_graph.remove_node(sample_nodes[1].id)
-    
-    assert sample_nodes[1].id not in sample_graph.nodes
-    assert len(sample_graph.edges) == 0  # Both edges should be removed
-    assert len(sample_graph.nodes) == 2
-
-def test_graph_get_edges(sample_graph, sample_nodes):
-    """Test getting edges from the graph."""
-    # Get edges by source
-    edges = sample_graph.get_edges(source_id=sample_nodes[0].id)
-    assert len(edges) == 1
-    assert next(iter(edges)).type == RelationType.CONTAINS
-    
-    # Get edges by target
-    edges = sample_graph.get_edges(target_id=sample_nodes[2].id)
-    assert len(edges) == 1
-    assert next(iter(edges)).type == RelationType.CALLS
-    
-    # Get edges by type
-    edges = sample_graph.get_edges(rel_type=RelationType.CONTAINS)
-    assert len(edges) == 1
-    assert next(iter(edges)).source == sample_nodes[0]
-
-def test_graph_get_neighbors(sample_graph, sample_nodes):
-    """Test getting neighboring nodes."""
-    # Get outgoing neighbors
-    neighbors = sample_graph.get_neighbors(sample_nodes[0].id, direction='out')
-    assert len(neighbors) == 1
-    assert next(iter(neighbors)) == sample_nodes[1]
-    
-    # Get incoming neighbors
-    neighbors = sample_graph.get_neighbors(sample_nodes[2].id, direction='in')
-    assert len(neighbors) == 1
-    assert next(iter(neighbors)) == sample_nodes[1]
-    
-    # Get both directions
-    neighbors = sample_graph.get_neighbors(sample_nodes[1].id, direction='both')
-    assert len(neighbors) == 2
-
-def test_graph_get_subgraph(sample_graph, sample_nodes):
-    """Test extracting subgraphs."""
-    # Get subgraph of first two nodes
-    node_ids = {sample_nodes[0].id, sample_nodes[1].id}
-    subgraph = sample_graph.get_subgraph(node_ids)
-    
-    assert len(subgraph.nodes) == 2
-    assert len(subgraph.edges) == 1
-    assert next(iter(subgraph.edges)).type == RelationType.CONTAINS
-
-def test_graph_merge(sample_nodes):
-    """Test merging graphs."""
-    # Create two graphs
-    graph1 = RelationshipGraph()
-    graph1.add_node(sample_nodes[0])
-    graph1.add_node(sample_nodes[1])
-    graph1.add_edge(Edge(
-        source=sample_nodes[0],
-        target=sample_nodes[1],
-        type=RelationType.CONTAINS
-    ))
-    
-    graph2 = RelationshipGraph()
-    graph2.add_node(sample_nodes[1])
-    graph2.add_node(sample_nodes[2])
-    graph2.add_edge(Edge(
-        source=sample_nodes[1],
-        target=sample_nodes[2],
+    # Add nodes and edges
+    node1 = graph.add_node(name="source", type="function", file_path="test.py")
+    node2 = graph.add_node(name="target", type="function", file_path="test.py")
+    graph.add_edge(
+        source=node1,
+        target=node2,
         type=RelationType.CALLS
-    ))
+    )
     
-    # Merge graphs
-    graph1.merge(graph2)
-    assert len(graph1.nodes) == 3
-    assert len(graph1.edges) == 2
+    # Verify graph has content
+    assert len(graph.nodes) == 2
+    assert len(graph.edges) == 1
+    
+    # Clear graph
+    graph.clear()
+    
+    # Verify graph is empty
+    assert len(graph.nodes) == 0
+    assert len(graph.edges) == 0
 
-def test_graph_serialization(sample_graph):
-    """Test graph serialization to/from dict."""
-    # Convert to dict
-    data = sample_graph.to_dict()
+def test_edge_properties():
+    """Test edge property handling."""
+    graph = Graph()
     
-    # Check dict structure
-    assert 'nodes' in data
-    assert 'edges' in data
-    assert len(data['nodes']) == 3
-    assert len(data['edges']) == 2
+    # Create nodes
+    node1 = graph.add_node(name="source", type="function", file_path="test.py")
+    node2 = graph.add_node(name="target", type="function", file_path="test.py")
     
-    # Convert back to graph
-    new_graph = RelationshipGraph.from_dict(data)
+    # Create edge with properties
+    properties = {
+        "line_number": 15,
+        "scope": "local",
+        "context": "function_call"
+    }
+    edge = graph.add_edge(
+        source=node1,
+        target=node2,
+        type=RelationType.CALLS,
+        properties=properties
+    )
     
-    # Check graph structure
-    assert len(new_graph.nodes) == len(sample_graph.nodes)
-    assert len(new_graph.edges) == len(sample_graph.edges)
+    # Verify properties
+    assert edge.properties == properties
+    assert edge.properties["line_number"] == 15
+    assert edge.properties["scope"] == "local"
+    assert edge.properties["context"] == "function_call"
+
+def test_node_properties():
+    """Test node property handling."""
+    graph = Graph()
     
-    # Check node equality
-    for node_id, node in sample_graph.nodes.items():
-        assert node_id in new_graph.nodes
-        new_node = new_graph.nodes[node_id]
-        assert new_node.type == node.type
-        assert new_node.name == node.name
-        assert new_node.file == node.file
-        
-    # Check edge equality
-    assert len(new_graph.edges) == len(sample_graph.edges)
-    for edge in sample_graph.edges:
-        matching = [e for e in new_graph.edges
-                   if e.source.id == edge.source.id and
-                   e.target.id == edge.target.id and
-                   e.type == edge.type]
-        assert len(matching) == 1 
+    # Create node with properties
+    properties = {
+        "visibility": "public",
+        "async": True,
+        "decorators": ["@property"]
+    }
+    node = graph.add_node(
+        name="test_function",
+        type="function",
+        file_path="test.py",
+        properties=properties
+    )
+    
+    # Verify properties
+    assert node.properties == properties
+    assert node.properties["visibility"] == "public"
+    assert node.properties["async"] is True
+    assert node.properties["decorators"] == ["@property"]
+
+def test_relation_types():
+    """Test all relation types are properly defined."""
+    # Verify all expected relation types exist
+    assert RelationType.IMPORTS.value == "imports"
+    assert RelationType.INHERITS.value == "inherits"
+    assert RelationType.CONTAINS.value == "contains"
+    assert RelationType.CALLS.value == "calls"
+    assert RelationType.REFERENCES.value == "references"
+    
+    # Verify no unexpected relation types
+    relation_types = {t.value for t in RelationType}
+    expected_types = {"imports", "inherits", "contains", "calls", "references"}
+    assert relation_types == expected_types 

@@ -37,13 +37,162 @@ class CodeAnalyzer:
             }
 
     def analyze_tree(self, tree: Union[Any, MockTree]) -> Dict[str, Any]:
-        """Analyze a syntax tree and return a structured dictionary."""
+        """Analyze a syntax tree and return a structured dictionary.
+        
+        Args:
+            tree: Syntax tree to analyze
+            
+        Returns:
+            Dict containing analysis results
+        """
         try:
             root = tree.root_node
-            imports = self._extract_imports(root)
-            functions = self._extract_functions(root)
-            classes = self._extract_classes(root)
-            variables = self._extract_variables(root)
+            imports = []
+            functions = []
+            classes = []
+            variables = []
+            
+            def process_node(node):
+                """Process a single node."""
+                if not node:
+                    return
+                    
+                if node.type == 'import_statement' or node.type == 'import':
+                    # Handle simple imports
+                    if node.text.startswith('import '):
+                        modules = node.text[7:].split(',')  # Skip 'import ' and split on comma
+                        for module in modules:
+                            module = module.strip()
+                            # Handle aliases
+                            if ' as ' in module:
+                                module, alias = module.split(' as ')
+                                module = module.strip()
+                                alias = alias.strip()
+                                imports.append({
+                                    'module': module,
+                                    'alias': alias,
+                                    'start_line': node.start_point[0] + 1,
+                                    'end_line': node.end_point[0] + 1
+                                })
+                            else:
+                                imports.append({
+                                    'module': module,
+                                    'start_line': node.start_point[0] + 1,
+                                    'end_line': node.end_point[0] + 1
+                                })
+                    # Handle from imports
+                    elif node.text.startswith('from '):
+                        parts = node.text.split(' import ')
+                        if len(parts) == 2:
+                            module = parts[0][5:].strip()  # Skip 'from '
+                            names = [n.strip() for n in parts[1].split(',')]
+                            for name in names:
+                                # Handle aliases
+                                if ' as ' in name:
+                                    name, alias = name.split(' as ')
+                                    name = name.strip()
+                                    alias = alias.strip()
+                                    imports.append({
+                                        'module': module,
+                                        'symbol': name,
+                                        'alias': alias,
+                                        'start_line': node.start_point[0] + 1,
+                                        'end_line': node.end_point[0] + 1
+                                    })
+                                else:
+                                    imports.append({
+                                        'module': module,
+                                        'symbol': name,
+                                        'start_line': node.start_point[0] + 1,
+                                        'end_line': node.end_point[0] + 1
+                                    })
+                                    
+                elif node.type == 'function_definition':
+                    name_node = node.child_by_field_name('name')
+                    if name_node:
+                        function_info = {
+                            'name': name_node.text,
+                            'start_line': node.start_point[0] + 1,
+                            'end_line': node.end_point[0] + 1,
+                            'parameters': []
+                        }
+                        
+                        # Process parameters
+                        params_node = node.child_by_field_name('parameters')
+                        if params_node:
+                            for param in params_node.children:
+                                if param.type == 'identifier':
+                                    function_info['parameters'].append({
+                                        'name': param.text,
+                                        'start_line': param.start_point[0] + 1,
+                                        'end_line': param.end_point[0] + 1
+                                    })
+                                    
+                        functions.append(function_info)
+                        
+                elif node.type == 'class_definition':
+                    name_node = node.child_by_field_name('name')
+                    if name_node:
+                        class_info = {
+                            'name': name_node.text,
+                            'start_line': node.start_point[0] + 1,
+                            'end_line': node.end_point[0] + 1,
+                            'bases': [],
+                            'methods': []
+                        }
+                        
+                        # Process base classes
+                        bases_node = node.child_by_field_name('bases')
+                        if bases_node:
+                            for base in bases_node.children:
+                                if base.type == 'identifier':
+                                    class_info['bases'].append(base.text)
+                                    
+                        # Process methods
+                        body_node = node.child_by_field_name('body')
+                        if body_node:
+                            for method in body_node.children:
+                                if method.type == 'function_definition':
+                                    method_name = method.child_by_field_name('name')
+                                    if method_name:
+                                        class_info['methods'].append({
+                                            'name': method_name.text,
+                                            'start_line': method.start_point[0] + 1,
+                                            'end_line': method.end_point[0] + 1
+                                        })
+                                        
+                        classes.append(class_info)
+                        
+                elif node.type == 'assignment':
+                    # Handle chained assignments
+                    left = node.child_by_field_name('left')
+                    right = node.child_by_field_name('right')
+                    if left and right:
+                        if isinstance(left, list):
+                            # Handle tuple unpacking
+                            for l in left:
+                                if l.type == 'identifier':
+                                    variables.append({
+                                        'name': l.text,
+                                        'start_line': node.start_point[0] + 1,
+                                        'end_line': node.end_point[0] + 1,
+                                        'type': self._infer_type(right)
+                                    })
+                        else:
+                            variables.append({
+                                'name': left.text,
+                                'start_line': node.start_point[0] + 1,
+                                'end_line': node.end_point[0] + 1,
+                                'type': self._infer_type(right)
+                            })
+
+            for node in root.children_by_field_name('body'):
+                if isinstance(node, list):
+                    # Handle lists of nodes (e.g., multiple imports from one line)
+                    for n in node:
+                        process_node(n)
+                else:
+                    process_node(node)
 
             return {
                 'imports': imports,
@@ -60,156 +209,173 @@ class CodeAnalyzer:
                 'variables': []
             }
 
-    def _extract_imports(self, node: Any) -> List[Dict[str, Any]]:
-        """Extract import statements.
+    def _extract_function(self, node: Any) -> Dict[str, Any]:
+        """Extract function information from a node."""
+        if node is None:
+            return {
+                'name': '',
+                'start_line': 0,
+                'end_line': 0,
+                'parameters': [],
+                'decorators': [],
+                'is_async': False
+            }
 
-        Args:
-            node: AST node
+        # Check for decorators
+        decorators = []
+        for child in node.children:
+            if child and child.type == 'decorator':
+                decorators.append(child.text)
 
-        Returns:
-            List of import information
-        """
-        imports = []
-        for child in node.children_by_field_name('body'):
-            if child.type == 'import':
-                text = child.text.decode('utf-8') if isinstance(child.text, bytes) else child.text
-                if text.startswith('from '):
-                    # Handle from imports
-                    parts = text.split(' import ')
-                    if len(parts) == 2:
-                        module = parts[0][5:].strip()  # Remove 'from '
-                        names = [n.strip() for n in parts[1].split(',')]
-                        for name in names:
-                            if name:
-                                imports.append({
-                                    'type': 'import',
-                                    'name': f'from {module} import {name}',
-                                    'start_line': child.start_point[0] + 1,
-                                    'end_line': child.end_point[0] + 1
-                                })
-                else:
-                    # Handle regular imports
-                    imports.append({
-                        'type': 'import',
-                        'name': text,
-                        'start_line': child.start_point[0] + 1,
-                        'end_line': child.end_point[0] + 1
-                    })
-        return imports
+        # Get function name and parameters
+        name = node.text if node and node.text else ''
+        parameters = self._extract_parameters(node)
 
-    def _extract_functions(self, node: Any) -> List[Dict[str, Any]]:
-        """Extract function definitions.
+        # Check if it's an async function
+        is_async = any(child and child.type == 'async' for child in node.children)
 
-        Args:
-            node: AST node
+        return {
+            'name': name,
+            'start_line': node.start_point[0] + 1 if node else 0,
+            'end_line': node.end_point[0] + 1 if node else 0,
+            'parameters': parameters,
+            'decorators': decorators,
+            'is_async': is_async
+        }
 
-        Returns:
-            List of function information
-        """
-        functions = []
-        for child in node.children_by_field_name('body'):
-            if child.type == 'function_definition':
-                name_node = child.child_by_field_name('name')
-                functions.append({
-                    'name': name_node.text.decode('utf-8') if isinstance(name_node.text, bytes) else name_node.text,
-                    'start_line': child.start_point[0] + 1,
-                    'end_line': child.end_point[0] + 1,
-                    'parameters': self._extract_parameters(child)
-                })
-        return functions
+    def _extract_class(self, node: Any) -> Dict[str, Any]:
+        """Extract class information from a node."""
+        if node is None:
+            return {
+                'name': '',
+                'start_line': 0,
+                'end_line': 0,
+                'methods': [],
+                'bases': []
+            }
 
-    def _extract_parameters(self, node: Any) -> List[Dict[str, Any]]:
-        """Extract function parameters.
+        # Get class name
+        name_node = node.child_by_field_name('name')
+        name = name_node.text if name_node else ''
 
-        Args:
-            node: AST node
-
-        Returns:
-            List of parameter information
-        """
-        params = []
-        params_node = node.child_by_field_name('parameters')
-        if params_node:
-            for param in params_node.children:
-                if param.type == 'identifier':
-                    params.append({
-                        'name': param.text.decode('utf-8') if isinstance(param.text, bytes) else param.text,
-                        'start_line': param.start_point[0] + 1,
-                        'end_line': param.end_point[0] + 1
-                    })
-        return params
-
-    def _extract_classes(self, node: Any) -> List[Dict[str, Any]]:
-        """Extract class definitions.
-
-        Args:
-            node: AST node
-
-        Returns:
-            List of class information
-        """
-        classes = []
-        for child in node.children_by_field_name('body'):
-            if child.type == 'class_definition':
-                name_node = child.child_by_field_name('name')
-                classes.append({
-                    'name': name_node.text.decode('utf-8') if isinstance(name_node.text, bytes) else name_node.text,
-                    'start_line': child.start_point[0] + 1,
-                    'end_line': child.end_point[0] + 1,
-                    'methods': self._extract_functions(child),
-                    'bases': self._extract_base_classes(child)
-                })
-        return classes
-
-    def _extract_base_classes(self, node: Any) -> List[str]:
-        """Extract base classes.
-
-        Args:
-            node: AST node
-
-        Returns:
-            List of base class names
-        """
+        # Get base classes
         bases = []
         bases_node = node.child_by_field_name('bases')
         if bases_node:
             for base in bases_node.children:
+                if base is None:
+                    continue
+
                 if base.type == 'identifier':
-                    bases.append(base.text.decode('utf-8') if isinstance(base.text, bytes) else base.text)
-        return bases
+                    # Simple base class
+                    bases.append(base.text)
+                elif base.type == 'keyword_argument':
+                    # Handle metaclass argument
+                    name_node = base.child_by_field_name('name')
+                    value_node = base.child_by_field_name('value')
+                    if name_node and name_node.text == 'metaclass' and value_node:
+                        bases.append(f'metaclass={value_node.text}')
+                elif base.type == 'attribute':
+                    # Handle qualified names (e.g., module.Class)
+                    bases.append(base.text)
 
-    def _extract_variables(self, node: Any) -> List[Dict[str, Any]]:
-        """Extract variable assignments.
+        # Get methods
+        methods = []
+        body_node = node.child_by_field_name('body')
+        if body_node:
+            for child in body_node.children:
+                if child and child.type == 'function_definition':
+                    methods.append(self._extract_function(child))
 
-        Args:
-            node: AST node
+        return {
+            'name': name,
+            'start_line': node.start_point[0] + 1 if node else 0,
+            'end_line': node.end_point[0] + 1 if node else 0,
+            'methods': methods,
+            'bases': bases
+        }
 
-        Returns:
-            List of variable information
-        """
-        variables = []
-        for child in node.children_by_field_name('body'):
-            if child.type == 'assignment':
-                left = child.child_by_field_name('left')
-                right = child.child_by_field_name('right')
-                if left and right:
-                    variables.append({
-                        'name': left.text.decode('utf-8') if isinstance(left.text, bytes) else left.text,
-                        'start_line': child.start_point[0] + 1,
-                        'end_line': child.end_point[0] + 1,
-                        'type': self._infer_type(right)
+    def _extract_parameters(self, node: Any) -> List[Dict[str, Any]]:
+        """Extract function parameters."""
+        if node is None:
+            return []
+
+        parameters = []
+        params_node = node.child_by_field_name('parameters')
+        if params_node:
+            for param in params_node.children:
+                if param is None:
+                    continue
+
+                if param.type == 'identifier':
+                    # Regular parameter
+                    parameters.append({
+                        'name': param.text,
+                        'start_line': param.start_point[0] + 1,
+                        'end_line': param.end_point[0] + 1,
+                        'type': 'parameter'
                     })
-        return variables
+                elif param.type == 'typed_parameter':
+                    # Type-annotated parameter
+                    name_node = param.child_by_field_name('name')
+                    type_node = param.child_by_field_name('type')
+                    if name_node:
+                        parameters.append({
+                            'name': name_node.text,
+                            'start_line': param.start_point[0] + 1,
+                            'end_line': param.end_point[0] + 1,
+                            'type': type_node.text if type_node else 'unknown'
+                        })
+                elif param.type == 'list_splat_pattern':
+                    # *args parameter
+                    name_node = param.child_by_field_name('name')
+                    if name_node:
+                        parameters.append({
+                            'name': f'*{name_node.text}',
+                            'start_line': param.start_point[0] + 1,
+                            'end_line': param.end_point[0] + 1,
+                            'type': 'args'
+                        })
+                elif param.type == 'dictionary_splat_pattern':
+                    # **kwargs parameter
+                    name_node = param.child_by_field_name('name')
+                    if name_node:
+                        parameters.append({
+                            'name': f'**{name_node.text}',
+                            'start_line': param.start_point[0] + 1,
+                            'end_line': param.end_point[0] + 1,
+                            'type': 'kwargs'
+                        })
+                elif param.type == 'default_parameter':
+                    # Parameter with default value
+                    name_node = param.child_by_field_name('name')
+                    value_node = param.child_by_field_name('value')
+                    if name_node:
+                        parameters.append({
+                            'name': name_node.text,
+                            'start_line': param.start_point[0] + 1,
+                            'end_line': param.end_point[0] + 1,
+                            'type': 'parameter',
+                            'has_default': True
+                        })
+        return parameters
+
+    def _extract_functions(self, node: Any) -> List[Dict[str, Any]]:
+        """Extract functions from a node."""
+        if node is None:
+            return []
+
+        functions = []
+        for child in node.children_by_field_name('body'):
+            if child and child.type == 'function_definition':
+                functions.append(self._extract_function(child))
+        return functions
 
     def _infer_type(self, node: Any) -> str:
-        """Infer type from value node.
+        """Infer type from value node."""
+        if node is None:
+            return 'unknown'
 
-        Args:
-            node: AST node
-
-        Returns:
-            Type string
-        """
         type_map = {
             'string': 'str',
             'integer': 'int',
@@ -218,7 +384,8 @@ class CodeAnalyzer:
             'false': 'bool',
             'none': 'None',
             'list': 'list',
-            'dictionary': 'dict'
+            'dictionary': 'dict',
+            'tuple': 'tuple'
         }
         return type_map.get(node.type, 'unknown')
 

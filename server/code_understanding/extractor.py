@@ -10,39 +10,35 @@ class SymbolExtractor:
     
     def __init__(self):
         """Initialize the symbol extractor."""
-        self.current_scope = 'global'
-        self.symbols = {}
-        self.references = {}
+        self.symbols: Dict[str, Dict[str, Any]] = {}
+        self.references: Dict[str, List[Dict[str, Any]]] = {
+            'imports': [],
+            'calls': [],
+            'attributes': [],
+            'variables': []
+        }
+        self.current_scope: Optional[str] = None
         
-    def extract_symbols(self, tree: Any) -> Dict[str, Any]:
+    def extract_symbols(self, tree: Any) -> tuple[Dict[str, Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]:
         """Extract symbols from a syntax tree.
         
         Args:
-            tree: Syntax tree to extract symbols from
+            tree: Syntax tree to analyze
             
         Returns:
-            Dict containing extracted symbols and references
+            Tuple of (symbols dict, references dict)
         """
         try:
-            if not tree or not hasattr(tree, 'root_node'):
-                return {'symbols': {}, 'references': {}}
-                
-            # Reset state
-            self.current_scope = None
-            self.symbols = {}
-            self.references = {}
+            self.symbols.clear()
+            self.references.clear()
+            self.current_scope = 'global'
             
-            # Process root node
-            self._process_node(tree.root_node)
-            
-            return {
-                'symbols': self.symbols,
-                'references': self.references
-            }
+            self._process_node(tree)
+            return self.symbols, self.references
             
         except Exception as e:
             logger.error(f"Failed to extract symbols: {e}")
-            return {'symbols': {}, 'references': {}}
+            return {}, {'imports': [], 'calls': [], 'attributes': [], 'variables': []}
             
     def _process_node(self, node: Any, parent_scope: Optional[str] = None):
         """Process a syntax tree node and extract symbols.
@@ -112,12 +108,27 @@ class SymbolExtractor:
                 modules = text[7:].split(',')  # Skip 'import ' and split on comma
                 for module in modules:
                     module = module.strip()
-                    self.symbols[module] = {
-                        'type': 'import',
-                        'scope': self.current_scope,
-                        'start': node.start_point,
-                        'end': node.end_point
-                    }
+                    # Handle aliases
+                    if ' as ' in module:
+                        module, alias = module.split(' as ')
+                        module = module.strip()
+                        alias = alias.strip()
+                        self.symbols[alias] = {
+                            'type': 'import',
+                            'scope': self.current_scope,
+                            'start': node.start_point,
+                            'end': node.end_point,
+                            'module': module,
+                            'alias': alias
+                        }
+                    else:
+                        self.symbols[module] = {
+                            'type': 'import',
+                            'scope': self.current_scope,
+                            'start': node.start_point,
+                            'end': node.end_point,
+                            'module': module
+                        }
             elif text.startswith('from '):
                 # From import
                 parts = text.split(' import ')
@@ -125,13 +136,29 @@ class SymbolExtractor:
                     module = parts[0][5:].strip()  # Skip 'from '
                     names = [n.strip() for n in parts[1].split(',')]
                     for name in names:
-                        self.symbols[name] = {
-                            'type': 'import',
-                            'scope': self.current_scope,
-                            'start': node.start_point,
-                            'end': node.end_point,
-                            'from_module': module
-                        }
+                        # Handle aliases
+                        if ' as ' in name:
+                            name, alias = name.split(' as ')
+                            name = name.strip()
+                            alias = alias.strip()
+                            self.symbols[alias] = {
+                                'type': 'import',
+                                'scope': self.current_scope,
+                                'start': node.start_point,
+                                'end': node.end_point,
+                                'module': module,
+                                'symbol': name,
+                                'alias': alias
+                            }
+                        else:
+                            self.symbols[name] = {
+                                'type': 'import',
+                                'scope': self.current_scope,
+                                'start': node.start_point,
+                                'end': node.end_point,
+                                'module': module,
+                                'symbol': name
+                            }
                         
         except Exception as e:
             logger.error(f"Failed to process import: {e}")
@@ -219,15 +246,13 @@ class SymbolExtractor:
         try:
             # Add reference
             symbol_name = node.text
-            if symbol_name not in self.references:
-                self.references[symbol_name] = []
+            if symbol_name not in self.references['attributes']:
+                self.references['attributes'].append({
+                    'scope': self.current_scope,
+                    'start': node.start_point,
+                    'end': node.end_point
+                })
                 
-            self.references[symbol_name].append({
-                'scope': self.current_scope,
-                'start': node.start_point,
-                'end': node.end_point
-            })
-            
             # Add symbol if not already present and not a parameter
             if (symbol_name not in self.symbols and 
                 not any(s.get('type') == 'parameter' and s.get('scope') == self.current_scope 
