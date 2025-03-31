@@ -3,14 +3,163 @@
 from typing import Any, Optional, List, Dict, Tuple
 import ast
 import logging
+import re
 
 # Import common types
 from .common_types import MockNode, MockTree
 
 logger = logging.getLogger(__name__)
 
+class MockQuery:
+    """Mock query for testing."""
+    def __init__(self, pattern: str):
+        self.pattern = pattern
+
+    def matches(self, node: MockNode) -> List[Dict[str, Any]]:
+        """Return matches based on the query pattern."""
+        matches = []
+        if node.type == 'program':
+            if 'import' in self.pattern:
+                # Handle import statements
+                for child in node.children:
+                    if child.type == 'import_statement':
+                        matches.append({
+                            'captures': [(child, 'import')]
+                        })
+            elif 'require' in self.pattern:
+                # Handle require statements
+                for child in node.children:
+                    if child.type == 'variable_declaration':
+                        for var_decl in child.children:
+                            if var_decl.type == 'variable_declarator':
+                                init = var_decl.child_by_field_name('init')
+                                if init and init.type == 'call_expression' and init.child_by_field_name('function').text.decode('utf-8') == 'require':
+                                    matches.append({
+                                        'captures': [(init, 'require_call')]
+                                    })
+            elif 'async' in self.pattern:
+                # Handle async functions
+                for child in node.children:
+                    if child.type == 'function_declaration' and any(c.type == 'async' for c in child.children):
+                        matches.append({
+                            'captures': [(child, 'function')]
+                        })
+                    elif child.type == 'class_declaration':
+                        for method in child.child_by_field_name('body').children:
+                            if method.type == 'method_definition' and any(c.type == 'async' for c in method.children):
+                                matches.append({
+                                    'captures': [(method, 'method')]
+                                })
+            elif 'export' in self.pattern:
+                # Handle export statements
+                for child in node.children:
+                    if child.type == 'export_statement':
+                        matches.append({
+                            'captures': [(child, 'export')]
+                        })
+            elif 'class' in self.pattern:
+                # Handle class declarations
+                for child in node.children:
+                    if child.type == 'class_declaration':
+                        matches.append({
+                            'captures': [(child, 'class')]
+                        })
+            elif 'variable' in self.pattern:
+                # Handle variable declarations
+                for child in node.children:
+                    if child.type == 'variable_declaration':
+                        for var_decl in child.children:
+                            if var_decl.type == 'variable_declarator':
+                                matches.append({
+                                    'captures': [(var_decl, 'variable')]
+                                })
+        return matches
+
 class MockParser:
     """Mock parser for testing."""
+    def __init__(self):
+        self.language = 'javascript'
+
+    def parse(self, code: bytes) -> MockNode:
+        """Parse code and return a mock AST."""
+        if not code:
+            return MockNode('program', children=[])
+
+        # Convert bytes to string
+        code_str = code.decode('utf-8')
+
+        # Create program node
+        program = MockNode('program', children=[])
+
+        # Parse imports
+        import_pattern = r'import\s+(?:(?:\{[^}]+\}|\*\s+as\s+\w+|\w+)(?:\s*,\s*(?:\{[^}]+\}|\w+))?)\s+from\s+[\'"]([^\'"]+)[\'"]'
+        for match in re.finditer(import_pattern, code_str):
+            source = match.group(1)
+            import_node = MockNode('import_statement', fields={
+                'source': MockNode('string', text=source),
+                'import_clause': MockNode('import_clause', text=match.group(0))
+            })
+            program.children.append(import_node)
+
+        # Parse requires
+        require_pattern = r'(?:const|let|var)\s+(\w+)\s*=\s*require\([\'"]([^\'"]+)[\'"]\)'
+        for match in re.finditer(require_pattern, code_str):
+            var_name, module = match.groups()
+            var_decl = MockNode('variable_declaration', children=[
+                MockNode('variable_declarator', fields={
+                    'name': MockNode('identifier', text=var_name),
+                    'init': MockNode('call_expression', fields={
+                        'function': MockNode('identifier', text='require'),
+                        'arguments': MockNode('arguments', children=[
+                            MockNode('string', text=module)
+                        ])
+                    })
+                })
+            ])
+            program.children.append(var_decl)
+
+        # Parse exports
+        export_pattern = r'export\s+(?:default\s+)?(?:(?:const|let|var|function|class)\s+(\w+)|(?:\{[^}]+\}))'
+        for match in re.finditer(export_pattern, code_str):
+            export_node = MockNode('export_statement', fields={
+                'declaration': MockNode('identifier', text=match.group(1)) if match.group(1) else None
+            })
+            program.children.append(export_node)
+
+        # Parse async functions
+        async_pattern = r'async\s+function\s+(\w+)'
+        for match in re.finditer(async_pattern, code_str):
+            func_node = MockNode('function_declaration', children=[
+                MockNode('async'),
+                MockNode('identifier', text=match.group(1))
+            ])
+            program.children.append(func_node)
+
+        # Parse classes
+        class_pattern = r'class\s+(\w+)'
+        for match in re.finditer(class_pattern, code_str):
+            class_node = MockNode('class_declaration', fields={
+                'name': MockNode('identifier', text=match.group(1)),
+                'body': MockNode('class_body', children=[])
+            })
+            program.children.append(class_node)
+
+        # Parse variables
+        var_pattern = r'(?:const|let|var)\s+(\w+)'
+        for match in re.finditer(var_pattern, code_str):
+            var_decl = MockNode('variable_declaration', children=[
+                MockNode('variable_declarator', fields={
+                    'name': MockNode('identifier', text=match.group(1))
+                })
+            ])
+            program.children.append(var_decl)
+
+        return program
+
+    def query(self, pattern: str) -> MockQuery:
+        """Create a mock query."""
+        return MockQuery(pattern)
+
     def parse(self, code: str) -> Optional[MockTree]:
         """Parse code and return a mock tree."""
         print(f"--- ENTERING MockParser.parse ---")

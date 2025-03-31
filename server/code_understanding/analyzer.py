@@ -24,26 +24,100 @@ class CodeAnalyzer:
         self.functions: List[Dict[str, Any]] = []
         self.classes: List[Dict[str, Any]] = []
         self.variables: List[Dict[str, Any]] = []
+        self.exports: List[Dict[str, Any]] = []  # Add exports list
         # Add other state variables as needed
 
     def analyze_code(self, code: str, language: str = 'python') -> Dict[str, List[Dict[str, Any]]]:
-        """Analyzes code string using the appropriate parser adapter."""
-        tree = self.parser.parse(code, language=language)
+        """Analyzes code string using the appropriate parser adapter.
         
-        if not tree or not tree.root_node:
-            logger.error(f"Parsing failed for language '{language}'. Cannot analyze.")
-            return {'imports': [], 'functions': [], 'classes': [], 'variables': []}
-
-        self.reset_state()
-        logger.info(f"Root node type: {tree.type} for language {language}")
-        self._analyze_node(tree, language)
-
-        return {
-            'imports': self.imports,
-            'functions': self.functions,
-            'classes': self.classes,
-            'variables': self.variables
-        }
+        Args:
+            code: Source code string to analyze.
+            language: Programming language of the code.
+            
+        Returns:
+            Dict containing analysis results with the following structure:
+            {
+                'has_errors': bool,
+                'error_details': List[Dict[str, str]],
+                'imports': List[Dict],
+                'functions': List[Dict],
+                'classes': List[Dict],
+                'variables': List[Dict],
+                'exports': List[Dict]
+            }
+        """
+        # Input validation
+        if code is None:
+            return {
+                'has_errors': True,
+                'error_details': [{"message": "Input code cannot be None"}],
+                'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': []
+            }
+        
+        if not isinstance(code, (str, bytes)):
+            return {
+                'has_errors': True,
+                'error_details': [{"message": f"Input code must be string or bytes, got {type(code)}"}],
+                'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': []
+            }
+        
+        # Convert bytes to string if needed
+        if isinstance(code, bytes):
+            try:
+                code = code.decode('utf-8')
+            except UnicodeDecodeError:
+                return {
+                    'has_errors': True,
+                    'error_details': [{"message": "Invalid UTF-8 encoding in input code"}],
+                    'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': []
+                }
+        
+        # Parse code
+        try:
+            tree = self.parser.parse(code, language=language)
+        except Exception as e:
+            return {
+                'has_errors': True,
+                'error_details': [{"message": f"Parser error: {str(e)}"}],
+                'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': []
+            }
+        
+        # Handle parsing failures
+        if not tree:
+            return {
+                'has_errors': True,
+                'error_details': [{"message": f"Parsing failed for language '{language}'. Cannot analyze."}],
+                'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': []
+            }
+        
+        if tree.has_errors:
+            return {
+                'has_errors': True,
+                'error_details': tree.error_details,
+                'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': []
+            }
+        
+        # Reset state and analyze
+        try:
+            self.reset_state()
+            logger.info(f"Root node type: {tree.type} for language {language}")
+            self._analyze_node(tree, language)
+            
+            return {
+                'has_errors': False,
+                'error_details': [],
+                'imports': self.imports,
+                'functions': self.functions,
+                'classes': self.classes,
+                'variables': self.variables,
+                'exports': self.exports
+            }
+        except Exception as e:
+            return {
+                'has_errors': True,
+                'error_details': [{"message": f"Analysis error: {str(e)}"}],
+                'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': []
+            }
 
     def _analyze_node(self, node: Union[MockNode, MockTree], parent_type: str = None, language: str = 'python', parent: Optional[MockNode] = None) -> None:
         """Analyze a single AST node and update the analysis results.
@@ -61,6 +135,14 @@ class CodeAnalyzer:
         if isinstance(node, MockTree):
             if node.root_node:
                 self._analyze_node(node.root_node, parent_type, language, parent)
+            return
+
+        # Process exports
+        if node.type == 'export_statement':
+            logger.debug(f"Processing export statement: {node.text}")
+            export_info = self._extract_js_export(node)
+            if export_info:
+                self.exports.append(export_info)
             return
 
         # Process imports and requires
@@ -143,7 +225,7 @@ class CodeAnalyzer:
                         })
 
         # Process functions
-        if node.type in ('function_declaration', 'function_definition'):
+        if node.type in ('function_declaration', 'function_definition', 'arrow_function'):
             # Handle function declarations and definitions
             name = ''
             if node.fields.get('name'):
@@ -153,10 +235,14 @@ class CodeAnalyzer:
                     if child.type in ('name', 'identifier'):
                         name = child.text
                         break
+
+            # Check if it's a top-level function
             effective_top_level = parent is None or parent.type == 'program'
             if parent and parent.type == 'variable_declaration':
                 effective_top_level = True
+
             logger.debug(f"Processing function node: name='{name}', effective_top_level={effective_top_level} (parent_type={parent.type if parent else 'None'})")
+            
             if effective_top_level:
                 func_info = self._extract_function(node)
                 if func_info['name']:
@@ -176,300 +262,417 @@ class CodeAnalyzer:
 
     # --- JavaScript Helper Methods ---
     def _extract_js_es6_import(self, node: MockNode):
-        """Extracts ES6 import details from an import_statement MockNode."""
-        # ---- Add extra logging ----
-        logger.debug(f"_extract_js_es6_import called for node: type={node.type}, text='{node.text}'")
-        logger.debug(f"Node fields: {node.fields}")
-        # ---- End extra logging ----
+        """Extracts ES6 import details from an import_statement MockNode.
         
-        module = node.fields.get('module')
-        default_import = node.fields.get('default_name')
-        named_imports = node.fields.get('named_names', [])
-        start_line = node.start_point[0] + 1 if node.start_point else 0
-        end_line = node.end_point[0] + 1 if node.end_point else 0
-
-        if not module:
-            logger.warning(f"JS import statement node missing 'module' field: {node.text}")
-            return
-
+        Handles various import types:
+        - Default imports: import name from './module'
+        - Named imports: import { name1, name2 } from './module'
+        - Namespace imports: import * as name from './module'
+        - Dynamic imports: import('./module')
+        - Import assertions: import json from './data.json' assert { type: 'json' }
+        """
+        logger.debug(f"_extract_js_es6_import called for node: type={node.type}, text='{node.text}'")
+        
+        # Initialize import info with common fields
+        import_info = {
+            'type': 'import',
+            'start_line': node.start_point[0] + 1 if node.start_point else 0,
+            'end_line': node.end_point[0] + 1 if node.end_point else 0
+        }
+        
+        # Get source module
+        source = None
+        is_dynamic = False
+        is_namespace = False
+        assertions = {}
+        
+        for child in node.children:
+            if child.type == 'string':
+                source = child.text.strip('"\'')
+            elif child.type == 'import_specifier':
+                # Handle named imports
+                for grandchild in child.children:
+                    if grandchild.type == 'identifier':
+                        import_info['names'] = import_info.get('names', []) + [grandchild.text]
+                        import_info['is_default'] = False
+                        break
+            elif child.type == 'namespace_import':
+                # Handle namespace imports (import * as name)
+                is_namespace = True
+                for grandchild in child.children:
+                    if grandchild.type == 'identifier':
+                        import_info['name'] = grandchild.text
+                        break
+            elif child.type == 'identifier':
+                # Handle default imports
+                import_info['name'] = child.text
+                import_info['is_default'] = True
+            elif child.type == 'import_assertion':
+                # Handle import assertions
+                for grandchild in child.children:
+                    if grandchild.type == 'object':
+                        for prop in grandchild.children:
+                            if prop.type == 'property':
+                                key = None
+                                value = None
+                                for prop_child in prop.children:
+                                    if prop_child.type == 'property_identifier':
+                                        key = prop_child.text
+                                    elif prop_child.type == 'string':
+                                        value = prop_child.text.strip('"\'')
+                                if key and value:
+                                    assertions[key] = value
+        
+        if not source:
+            logger.warning(f"JS import statement node missing source: {node.text}")
+            return None
+        
+        import_info.update({
+            'module': source,
+            'is_dynamic': is_dynamic,
+            'is_namespace': is_namespace
+        })
+        
+        if assertions:
+            import_info['assertions'] = assertions
+        
         # Add default import if present
-        if default_import:
-            self.imports.append({
-                'type': 'import',
-                'name': default_import,
-                'module': module,
-                'is_default': True,
-                'start_line': start_line,
-                'end_line': end_line
-            })
-            logger.debug(f"Extracted JS default import: {default_import} from {module}")
-
+        if import_info.get('name'):
+            logger.debug(f"Extracted JS default import: {import_info['name']} from {source}")
+        
         # Add named imports if present
-        for named_import in named_imports:
-            self.imports.append({
-                'type': 'import',
-                'name': named_import,
-                'module': module,
-                'is_default': False,
-                'start_line': start_line,
-                'end_line': end_line
-            })
-            logger.debug(f"Extracted JS named import: {named_import} from {module}")
-
-        # Handle namespace imports if present
-        namespace_import = node.fields.get('namespace_name')
-        if namespace_import:
-            self.imports.append({
-                'type': 'import',
-                'name': namespace_import,
-                'module': module,
-                'is_namespace': True,
-                'start_line': start_line,
-                'end_line': end_line
-            })
-            logger.debug(f"Extracted JS namespace import: {namespace_import} from {module}")
+        if import_info.get('names'):
+            logger.debug(f"Extracted JS named imports: {import_info['names']} from {source}")
+        
+        return import_info
 
     def _extract_js_require(self, node: MockNode) -> Optional[Dict[str, Any]]:
-        """Extract information about a JavaScript require statement.
-
-        Args:
-            node: The AST node representing a require statement.
-
-        Returns:
-            A dictionary containing information about the require statement, or None if not a require.
-        """
-        if not node:
-            return None
-
+        """Extracts require statement details from a call_expression MockNode."""
         logger.debug(f"_extract_js_require called for node: type={node.type}, text='{node.text}'")
-
-        # Handle variable declarator nodes
-        if node.type == 'variable_declarator':
-            # Check if this is a require statement
-            if node.fields.get('type') == 'require':
-                return {
-                    'type': 'require',
-                    'name': node.fields.get('name'),
-                    'module': node.fields.get('module'),
-                    'start_line': node.start_point[0] + 1 if node.start_point else 0,
-                    'end_line': node.end_point[0] + 1 if node.end_point else 0
-                }
-
-            # Look for a call_expression child that might be a require
-            name = None
-            name_node = node.children[0] if node.children else None
-            if name_node and name_node.type == 'identifier':
-                name = name_node.text
-                logger.debug(f"Found variable name: {name}")
-
-            # Look for the require call in the initializer
-            for child in node.children:
-                if child.type == 'call_expression':
-                    logger.debug(f"Found call_expression child: {child.text}")
-                    # Check if this is a require call
-                    callee = None
-                    module = None
-                    for call_child in child.children:
-                        logger.debug(f"Processing call_child: type={call_child.type}, text='{call_child.text}'")
-                        if call_child.type == 'identifier' and call_child.text == 'require':
-                            callee = call_child
-                        elif call_child.type == 'string':
-                            module = call_child.text.strip('"\'')
-
-                    if callee and module:
-                        logger.debug(f"Found require call: callee={callee.text}, module={module}")
-                        return {
-                            'type': 'require',
-                            'name': name or module.split('/')[-1],
-                            'module': module,
-                            'start_line': node.start_point[0] + 1 if node.start_point else 0,
-                            'end_line': node.end_point[0] + 1 if node.end_point else 0
-                        }
-            return None
-
-        # Handle direct call_expression nodes
-        if node.type != 'call_expression':
-            return None
-
-        logger.debug(f"Processing call_expression node: {node.text}")
-        # Check if this is a require call
-        callee = None
-        module = None
+        
+        # Check if it's a require call
+        is_require = False
+        source = None
+        
         for child in node.children:
-            logger.debug(f"Processing child: type={child.type}, text='{child.text}'")
             if child.type == 'identifier' and child.text == 'require':
-                callee = child
-            elif child.type == 'string':
-                module = child.text.strip('"\'')
+                is_require = True
+            elif child.type == 'arguments':
+                for arg in child.children:
+                    if arg.type == 'string':
+                        source = arg.text.strip('"\'')
+                        break
 
-        if not callee or not module:
+        if not is_require or not source:
             return None
 
-        # For direct require calls without assignment, use the last part of the path as the name
-        name = module.split('/')[-1]
-
-        logger.debug(f"Found require call: callee={callee.text}, module={module}")
         return {
             'type': 'require',
-            'name': name,
-            'module': module,
+            'name': source,  # Use source as name for require statements
+            'module': source,
+            'is_default': True,
             'start_line': node.start_point[0] + 1 if node.start_point else 0,
             'end_line': node.end_point[0] + 1 if node.end_point else 0
         }
 
+    def _extract_js_export(self, node: MockNode) -> Optional[Dict[str, Any]]:
+        """Extracts export statement details from an export_statement MockNode.
+        
+        Handles various export types:
+        - Named exports: export { name1, name2 }
+        - Default exports: export default value
+        - Re-exports: export { name as renamed } from './module'
+        - Namespace exports: export * from './module'
+        """
+        logger.debug(f"_extract_js_export called for node: type={node.type}, text='{node.text}'")
+        
+        # Initialize export info with common fields
+        export_info = {
+            'type': 'export',
+            'start_line': node.start_point[0] + 1 if node.start_point else 0,
+            'end_line': node.end_point[0] + 1 if node.end_point else 0
+        }
+        
+        # Check for default export
+        is_default = False
+        name = None
+        source = None
+        is_namespace = False
+        
+        for child in node.children:
+            if child.type == 'export_clause':
+                is_default = True
+                for grandchild in child.children:
+                    if grandchild.type == 'identifier':
+                        name = grandchild.text
+                        break
+            elif child.type == 'identifier':
+                name = child.text
+                is_default = True
+            elif child.type == 'namespace_export':
+                is_namespace = True
+                # Look for source module
+                for grandchild in child.children:
+                    if grandchild.type == 'string':
+                        source = grandchild.text.strip('"\'')
+                        break
+            elif child.type == 'export_specifier':
+                # Handle named exports and re-exports
+                for grandchild in child.children:
+                    if grandchild.type == 'identifier':
+                        name = grandchild.text
+                        break
+                    elif grandchild.type == 'string':
+                        source = grandchild.text.strip('"\'')
+                        break
+            elif child.type == 'string':
+                source = child.text.strip('"\'')
+        
+        if is_namespace:
+            export_info.update({
+                'is_namespace': True,
+                'source': source
+            })
+            return export_info
+        
+        if not name:
+            logger.warning(f"Could not extract export name from node: {node.text}")
+            return None
+        
+        export_info.update({
+            'name': name,
+            'is_default': is_default,
+            'source': source
+        })
+        
+        # Handle re-exports
+        if source and not is_default:
+            export_info['is_re_export'] = True
+        
+        return export_info
+
     # --- Common Helper Methods (unchanged from previous state) ---
 
     def _extract_function(self, node: MockNode) -> Dict[str, Any]:
-        """Extract information about a function or method definition.
-
-        Args:
-            node: The AST node representing the function or method definition.
-
-        Returns:
-            dict: A dictionary containing the function name, start and end line numbers,
-                  parameters, decorators, and async status.
+        """Extracts function details from a function node.
+        
+        Handles various function types:
+        - Regular functions
+        - Arrow functions
+        - Async functions
+        - Generator functions
+        - Decorated functions
+        - Class methods
         """
-        if not node:
-            return {
-                'name': '',
-                'start_line': 0,
-                'end_line': 0,
-                'parameters': [],
-                'decorators': [],
-                'is_async': False,
-                'is_static': False
-            }
-
-        # Extract function name
+        logger.debug(f"_extract_function called for node: type={node.type}, text='{node.text}'")
+        
+        # Initialize function info with common fields
+        func_info = {
+            'type': 'function',
+            'start_line': node.start_point[0] + 1 if node.start_point else 0,
+            'end_line': node.end_point[0] + 1 if node.end_point else 0,
+            'is_async': False,
+            'is_generator': False,
+            'is_arrow': node.type == 'arrow_function',
+            'is_method': False,
+            'is_static': False,
+            'is_private': False,
+            'decorators': [],
+            'parameters': [],
+            'return_type': None
+        }
+        
+        # Extract name
         name = ''
-        if node.type == 'method_definition':
-            # For method definitions, get name from the name field
-            name_node = node.fields.get('name')
-            if name_node and hasattr(name_node, 'text'):
-                name = name_node.text
-            # Check if method is static
-            is_static = any(child.type == 'static' for child in node.children)
-        elif node.type == 'function_declaration':
-            # For function declarations, get name from the name field or first child
-            name_node = node.fields.get('name')
-            if name_node and hasattr(name_node, 'text'):
-                name = name_node.text
-            else:
-                for child in node.children:
-                    if child.type in ('name', 'identifier'):
-                        name = child.text
-                        break
+        if node.fields.get('name'):
+            name = node.fields['name']
         else:
-            # For regular function definitions and arrow functions, get name from children
             for child in node.children:
                 if child.type in ('name', 'identifier'):
                     name = child.text
                     break
-            # If no name found in children, check fields
-            if not name and node.fields.get('name'):
-                name = node.fields['name']
-
-        # Extract decorators
-        decorators = []
-        for child in node.children:
-            if child.type == 'decorator':
-                decorators.append(child.text)
-
+        
+        func_info['name'] = name
+        
+        # Check for decorators
+        if node.fields.get('decorators'):
+            for decorator in node.fields['decorators']:
+                if decorator.type == 'decorator':
+                    decorator_name = ''
+                    for child in decorator.children:
+                        if child.type == 'identifier':
+                            decorator_name = child.text
+                            break
+                    if decorator_name:
+                        func_info['decorators'].append(decorator_name)
+        
+        # Check for async/await
+        if node.fields.get('async'):
+            func_info['is_async'] = True
+        
+        # Check for generator
+        if node.fields.get('generator'):
+            func_info['is_generator'] = True
+        
+        # Check for static method
+        if node.fields.get('static'):
+            func_info['is_static'] = True
+        
+        # Check for private method
+        if name.startswith('#'):
+            func_info['is_private'] = True
+            func_info['name'] = name[1:]  # Remove # prefix
+        
         # Extract parameters
-        params_node = None
-        for child in node.children:
-            if child.type == 'parameters':
-                params_node = child
-                break
-        parameters = self._extract_parameters(params_node) if params_node else []
-
-        # Check if function is async
-        is_async = any(child.type == 'async' for child in node.children)
-
-        # Get line numbers - end_point[0] is already 0-based
-        start_line = node.start_point[0] + 1 if node.start_point else 0
-        end_line = node.end_point[0] if node.end_point else 0
-
-        # Log method extraction details
-        logger.debug(f"Extracting {'method' if node.type == 'method_definition' else 'function'} '{name}'")
-        if node.type == 'method_definition':
-            logger.debug(f"  Method is static: {is_static}")
-
-        return {
-            'name': name,
-            'start_line': start_line,
-            'end_line': end_line,
-            'parameters': parameters,
-            'decorators': decorators,
-            'is_async': is_async,
-            'is_static': is_static if node.type == 'method_definition' else False
-        }
+        if node.fields.get('parameters'):
+            for param in node.fields['parameters']:
+                param_info = {
+                    'name': '',
+                    'type': None,
+                    'default': None,
+                    'is_rest': False,
+                    'is_optional': False
+                }
+                
+                for child in param.children:
+                    if child.type == 'identifier':
+                        param_info['name'] = child.text
+                    elif child.type == 'type_annotation':
+                        param_info['type'] = child.text
+                    elif child.type == 'default_value':
+                        param_info['default'] = child.text
+                    elif child.type == 'rest_parameter':
+                        param_info['is_rest'] = True
+                
+                if param_info['name']:
+                    func_info['parameters'].append(param_info)
+        
+        # Extract return type if present
+        if node.fields.get('return_type'):
+            func_info['return_type'] = node.fields['return_type'].text
+        
+        # Extract body if needed (for future use)
+        if node.fields.get('body'):
+            func_info['has_body'] = True
+        
+        logger.debug(f"Extracted function info: {func_info}")
+        return func_info
 
     def _extract_class(self, node: MockNode) -> Dict[str, Any]:
-        """Extract information about a class definition.
-
-        Args:
-            node: The AST node representing the class definition.
-
-        Returns:
-            dict: A dictionary containing the class name, base classes, methods, and attributes.
+        """Extracts class details from a class node.
+        
+        Handles various class features:
+        - Class fields (public, private, static)
+        - Class methods (public, private, static)
+        - Class decorators
+        - Class inheritance
+        - Class expressions
         """
-        if not node:
-            return {
-                'name': '',
-                'base_classes': [],
-                'methods': [],
-                'attributes': []
-            }
-
+        logger.debug(f"_extract_class called for node: type={node.type}, text='{node.text}'")
+        
+        # Initialize class info with common fields
+        class_info = {
+            'type': 'class',
+            'start_line': node.start_point[0] + 1 if node.start_point else 0,
+            'end_line': node.end_point[0] + 1 if node.end_point else 0,
+            'name': '',
+            'is_expression': False,
+            'decorators': [],
+            'extends': None,
+            'implements': [],
+            'fields': [],
+            'methods': [],
+            'constructors': []
+        }
+        
         # Extract class name
         name = ''
-        for child in node.children:
-            if child.type in ('name', 'identifier'):
-                name = child.text
-                break
-
-        # Extract base classes
-        base_classes = []
-        for child in node.children:
-            if child.type == 'extends_clause':
-                for base in child.children:
-                    if base.type == 'name':
-                        base_classes.append(base.text)
-
-        # Extract methods and attributes
-        methods = []
-        attributes = []
+        if node.fields.get('name'):
+            name = node.fields['name']
+        else:
+            for child in node.children:
+                if child.type == 'identifier':
+                    name = child.text
+                    break
         
-        # Get the class body - check both body and class_body fields
-        body_node = node.fields.get('body') or node.fields.get('class_body')
-        if body_node:
-            for child in body_node.children:
-                if child.type in ('function_definition', 'method_definition'):
-                    method_info = self._extract_function(child)
-                    if method_info['name']:
-                        methods.append(method_info)
-                elif child.type == 'field_definition':
-                    # Handle class fields/attributes
+        class_info['name'] = name
+        
+        # Check for class expression
+        if node.type == 'class_expression':
+            class_info['is_expression'] = True
+        
+        # Extract decorators
+        if node.fields.get('decorators'):
+            for decorator in node.fields['decorators']:
+                if decorator.type == 'decorator':
+                    decorator_name = ''
+                    for child in decorator.children:
+                        if child.type == 'identifier':
+                            decorator_name = child.text
+                            break
+                    if decorator_name:
+                        class_info['decorators'].append(decorator_name)
+        
+        # Extract class body
+        body = None
+        for child in node.children:
+            if child.type == 'class_body':
+                body = child
+                break
+        
+        if body:
+            for child in body.children:
+                if child.type == 'field_definition':
+                    # Handle class fields
+                    field_info = {
+                        'name': '',
+                        'type': None,
+                        'is_static': False,
+                        'is_private': False,
+                        'is_readonly': False,
+                        'initializer': None
+                    }
+                    
                     for field_child in child.children:
-                        if field_child.type == 'name':
-                            attributes.append({
-                                'name': field_child.text,
-                                'is_static': any(c.type == 'static' for c in child.children)
-                            })
-
-        # Log class extraction details
-        logger.debug(f"Extracting class '{name}'")
-        logger.debug(f"  Base classes: {base_classes}")
-        logger.debug(f"  Methods: {[m['name'] for m in methods]}")
-        logger.debug(f"  Attributes: {[a['name'] for a in attributes]}")
-
-        return {
-            'name': name,
-            'base_classes': base_classes,
-            'methods': methods,
-            'attributes': attributes
-        }
+                        if field_child.type == 'property_identifier':
+                            field_info['name'] = field_child.text
+                            if field_info['name'].startswith('#'):
+                                field_info['is_private'] = True
+                                field_info['name'] = field_info['name'][1:]
+                        elif field_child.type == 'static':
+                            field_info['is_static'] = True
+                        elif field_child.type == 'readonly':
+                            field_info['is_readonly'] = True
+                        elif field_child.type == 'type_annotation':
+                            field_info['type'] = field_child.text
+                        elif field_child.type == 'initializer':
+                            field_info['initializer'] = field_child.text
+                    
+                    if field_info['name']:
+                        class_info['fields'].append(field_info)
+                
+                elif child.type == 'method_definition':
+                    # Handle class methods
+                    method_info = self._extract_function(child)
+                    method_info['is_method'] = True
+                    
+                    if method_info['name'] == 'constructor':
+                        class_info['constructors'].append(method_info)
+                    else:
+                        class_info['methods'].append(method_info)
+        
+        # Extract inheritance
+        if node.fields.get('extends'):
+            class_info['extends'] = node.fields['extends'].text
+        
+        # Extract interfaces (if TypeScript)
+        if node.fields.get('implements'):
+            for interface in node.fields['implements']:
+                if interface.type == 'identifier':
+                    class_info['implements'].append(interface.text)
+        
+        logger.debug(f"Extracted class info: {class_info}")
+        return class_info
 
     def _extract_parameters(self, node: MockNode) -> List[Dict[str, Any]]:
         """Extract information about function parameters.
@@ -552,28 +755,79 @@ class CodeAnalyzer:
         }
         return type_map.get(node.type, 'unknown')
 
-    def analyze_file(self, file_path: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Analyze a Python file and extract information about its contents.
-
+    def analyze_file(self, file_path: str, language: Optional[str] = None) -> Dict[str, Any]:
+        """Analyze a source code file.
+        
         Args:
-            file_path: Path to the Python file to analyze.
-
+            file_path: Path to the source code file.
+            language: Optional language override. If not provided, inferred from file extension.
+            
         Returns:
-            Dictionary containing analysis results.
-
-        Raises:
-            FileNotFoundError: If the file does not exist.
+            Dict containing analysis results with the following structure:
+            {
+                'has_errors': bool,
+                'error_details': List[Dict[str, str]],
+                'imports': List[Dict],
+                'functions': List[Dict],
+                'classes': List[Dict],
+                'variables': List[Dict],
+                'exports': List[Dict]
+            }
         """
+        # Input validation
+        if not file_path:
+            return {
+                'has_errors': True,
+                'error_details': [{"message": "File path cannot be empty"}],
+                'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': []
+            }
+        
+        # Check file existence
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
-
+            return {
+                'has_errors': True,
+                'error_details': [{"message": f"File not found: {file_path}"}],
+                'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': []
+            }
+        
+        # Infer language from file extension if not provided
+        if not language:
+            ext = os.path.splitext(file_path)[1].lower()
+            language = {
+                '.py': 'python',
+                '.js': 'javascript',
+                '.swift': 'swift'
+            }.get(ext)
+            if not language:
+                return {
+                    'has_errors': True,
+                    'error_details': [{"message": f"Could not determine language for file: {file_path}"}],
+                    'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': []
+                }
+        
+        # Read and analyze file
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path, 'r', encoding='utf-8') as f:
                 code = f.read()
-            return self.analyze_code(code)
+            return self.analyze_code(code, language)
+        except UnicodeDecodeError:
+            return {
+                'has_errors': True,
+                'error_details': [{"message": f"File {file_path} is not valid UTF-8"}],
+                'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': []
+            }
+        except IOError as e:
+            return {
+                'has_errors': True,
+                'error_details': [{"message": f"Error reading file {file_path}: {str(e)}"}],
+                'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': []
+            }
         except Exception as e:
-            logger.error(f"Failed to analyze file {file_path}: {e}")
-            raise
+            return {
+                'has_errors': True,
+                'error_details': [{"message": f"Unexpected error analyzing file {file_path}: {str(e)}"}],
+                'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': []
+            }
 
     def analyze_directory(self, directory_path):
         """Analyze all Python files in a directory.

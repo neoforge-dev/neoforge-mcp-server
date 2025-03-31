@@ -148,12 +148,383 @@ def test_analyze_javascript_code(analyzer, sample_js_code):
     assert len(variables) >= 3, f"Expected at least 3 top-level variables, found {len(variables)}"
     
     # Verify exports (Need CodeAnalyzer to extract this, maybe from 'export_statement' nodes)
-    # exports = result.get('exports', [])
-    # assert len(exports) == 3, "Expected 3 exports"
-    # assert any(exp['name'] == 'MyClass' for exp in exports)
-    # assert any(exp['name'] == 'greet' for exp in exports)
-    # assert any(exp['is_default'] for exp in exports)
+    exports = result.get('exports', [])
+    assert len(exports) == 3, f"Expected 3 exports, found {len(exports)}"
+    assert any(exp['name'] == 'MyClass' and not exp['is_default'] for exp in exports), "Did not find named export 'MyClass'"
+    assert any(exp['name'] == 'greet' and not exp['is_default'] for exp in exports), "Did not find named export 'greet'"
+    assert any(exp['name'] == 'farewell' and exp['is_default'] for exp in exports), "Did not find default export 'farewell'"
 
-# TODO: Add test_analyze_javascript_file using tmp_path fixture
+def test_analyze_javascript_file(analyzer, sample_js_code, tmp_path):
+    """Test analyzing a JavaScript file using CodeAnalyzer."""
+    # Create a temporary JavaScript file
+    js_file = tmp_path / "test.js"
+    js_file.write_text(sample_js_code)
+    
+    # Analyze the file
+    result = analyzer.analyze_file(str(js_file), language='javascript')
+    
+    assert result is not None, "Analysis should return a result dictionary"
+    
+    # Verify imports/requires
+    imports = result.get('imports', [])
+    assert len(imports) == 3, f"Expected 3 imports/requires, found {len(imports)}"
+    
+    # Verify functions
+    functions = result.get('functions', [])
+    assert len(functions) == 2, f"Expected 2 top-level functions, found {len(functions)}"
+    
+    # Verify classes
+    classes = result.get('classes', [])
+    assert len(classes) == 1, "Should find one class"
+    
+    # Verify variables
+    variables = result.get('variables', [])
+    assert len(variables) >= 3, f"Expected at least 3 top-level variables, found {len(variables)}"
+    
+    # Verify exports
+    exports = result.get('exports', [])
+    assert len(exports) == 3, f"Expected 3 exports, found {len(exports)}"
+
+def test_syntax_errors(analyzer):
+    """Test handling of JavaScript syntax errors."""
+    # Test with invalid syntax
+    invalid_code = """
+    function test() {
+        if (true) {
+            console.log("Missing closing brace"
+    }
+    """
+    
+    result = analyzer.analyze_code(invalid_code, language='javascript')
+    assert result is not None, "Analysis should return a result even with syntax errors"
+    assert result.get('has_errors', False), "Result should indicate syntax errors"
+    assert len(result.get('error_details', [])) > 0, "Should have error details"
+    
+    # Test with empty file
+    empty_code = ""
+    result = analyzer.analyze_code(empty_code, language='javascript')
+    assert result is not None, "Analysis should return a result for empty input"
+    assert result.get('has_errors', False), "Result should indicate empty input error"
+    
+    # Test with invalid UTF-8
+    invalid_utf8 = b'\x80invalid utf-8'
+    result = analyzer.analyze_code(invalid_utf8, language='javascript')
+    assert result is not None, "Analysis should return a result for invalid UTF-8"
+    assert result.get('has_errors', False), "Result should indicate UTF-8 error"
+
+def test_js_features(analyzer):
+    """Test parsing of various JavaScript features."""
+    # Test async/await
+    async_code = """
+    async function fetchData() {
+        const response = await fetch('https://api.example.com/data');
+        return await response.json();
+    }
+    
+    class AsyncClass {
+        async method() {
+            await this.doSomething();
+        }
+    }
+    """
+    
+    result = analyzer.analyze_code(async_code, language='javascript')
+    assert result is not None, "Analysis should return a result for async code"
+    
+    # Verify async functions
+    functions = result.get('functions', [])
+    async_functions = [f for f in functions if f.get('is_async', False)]
+    assert len(async_functions) == 1, "Should find one async function"
+    
+    # Verify async methods
+    classes = result.get('classes', [])
+    async_methods = [m for c in classes for m in c.get('methods', []) if m.get('is_async', False)]
+    assert len(async_methods) == 1, "Should find one async method"
+    
+    # Test different export variants
+    export_code = """
+    // Named exports
+    export const name = 'test';
+    export function helper() {}
+    
+    // Default export
+    export default class MainClass {}
+    
+    // Re-export
+    export { name as renamed } from './module';
+    
+    // Namespace export
+    export * from './module';
+    """
+    
+    result = analyzer.analyze_code(export_code, language='javascript')
+    assert result is not None, "Analysis should return a result for export code"
+    
+    # Verify exports
+    exports = result.get('exports', [])
+    assert len(exports) >= 4, "Should find all export variants"
+    
+    # Test template literals and destructuring
+    modern_code = """
+    const { name, age, ...rest } = user;
+    const [first, second, ...others] = array;
+    
+    const greeting = `Hello ${name}, you are ${age} years old!`;
+    const multiline = `
+        This is a
+        multiline string
+    `;
+    """
+    
+    result = analyzer.analyze_code(modern_code, language='javascript')
+    assert result is not None, "Analysis should return a result for modern JS features"
+    
+    # Verify variables with destructuring
+    variables = result.get('variables', [])
+    destructured = [v for v in variables if v.get('is_destructured', False)]
+    assert len(destructured) >= 2, "Should find destructured variables"
+    
+    # Verify template literals
+    template_vars = [v for v in variables if v.get('is_template_literal', False)]
+    assert len(template_vars) >= 2, "Should find template literal variables"
+
+def test_error_handling(analyzer):
+    """Test error handling in the JavaScript parser adapter."""
+    # Test with None input
+    result = analyzer.analyze_code(None, language='javascript')
+    assert result is not None, "Analysis should return a result for None input"
+    assert result.get('has_errors', False), "Result should indicate error"
+    
+    # Test with invalid language
+    result = analyzer.analyze_code("console.log('test');", language='invalid')
+    assert result is not None, "Analysis should return a result for invalid language"
+    assert result.get('has_errors', False), "Result should indicate error"
+    
+    # Test with very large input
+    large_code = "console.log('test');" * 10000
+    result = analyzer.analyze_code(large_code, language='javascript')
+    assert result is not None, "Analysis should return a result for large input"
+    
+    # Test with non-existent file
+    result = analyzer.analyze_file("nonexistent.js", language='javascript')
+    assert result is not None, "Analysis should return a result for non-existent file"
+    assert result.get('has_errors', False), "Result should indicate file not found error"
+    
+    # Test with file permission issues
+    # Note: This test might need to be skipped on some systems
+    import os
+    try:
+        with open("readonly.js", "w") as f:
+            f.write("console.log('test');")
+        os.chmod("readonly.js", 0o000)  # Remove all permissions
+        
+        result = analyzer.analyze_file("readonly.js", language='javascript')
+        assert result is not None, "Analysis should return a result for permission error"
+        assert result.get('has_errors', False), "Result should indicate permission error"
+    finally:
+        # Clean up
+        try:
+            os.chmod("readonly.js", 0o644)  # Restore permissions
+            os.remove("readonly.js")
+        except:
+            pass
+
+def test_modern_js_features(analyzer):
+    """Test parsing of modern JavaScript features."""
+    # Test class fields and private methods
+    class_code = """
+    class ModernClass {
+        #privateField = 42;
+        static #privateStaticField = 'private';
+        readonly #readonlyField = 'readonly';
+        
+        #privateMethod() {
+            return this.#privateField;
+        }
+        
+        static #privateStaticMethod() {
+            return ModernClass.#privateStaticField;
+        }
+        
+        async #privateAsyncMethod() {
+            await this.doSomething();
+        }
+    }
+    """
+    
+    result = analyzer.analyze_code(class_code, language='javascript')
+    assert result is not None, "Analysis should return a result for modern class features"
+    
+    # Verify class fields
+    classes = result.get('classes', [])
+    assert len(classes) == 1, "Should find one class"
+    modern_class = classes[0]
+    
+    # Check private fields
+    private_fields = [f for f in modern_class['fields'] if f['is_private']]
+    assert len(private_fields) == 3, "Should find 3 private fields"
+    
+    # Check static fields
+    static_fields = [f for f in modern_class['fields'] if f['is_static']]
+    assert len(static_fields) == 1, "Should find 1 static field"
+    
+    # Check readonly fields
+    readonly_fields = [f for f in modern_class['fields'] if f['is_readonly']]
+    assert len(readonly_fields) == 1, "Should find 1 readonly field"
+    
+    # Check private methods
+    private_methods = [m for m in modern_class['methods'] if m['is_private']]
+    assert len(private_methods) == 3, "Should find 3 private methods"
+    
+    # Check async methods
+    async_methods = [m for m in modern_class['methods'] if m['is_async']]
+    assert len(async_methods) == 1, "Should find 1 async method"
+
+def test_export_variants(analyzer):
+    """Test parsing of different export types."""
+    export_code = """
+    // Named exports
+    export const name = 'test';
+    export function helper() {}
+    
+    // Default export
+    export default class MainClass {}
+    
+    // Re-export
+    export { name as renamed } from './module';
+    
+    // Namespace export
+    export * from './module';
+    
+    // Export list
+    export { a, b, c };
+    
+    // Export with assertions
+    export const data = await import('./data.json', { assert: { type: 'json' } });
+    """
+    
+    result = analyzer.analyze_code(export_code, language='javascript')
+    assert result is not None, "Analysis should return a result for export variants"
+    
+    # Verify exports
+    exports = result.get('exports', [])
+    assert len(exports) >= 6, "Should find all export variants"
+    
+    # Check named exports
+    named_exports = [e for e in exports if not e['is_default'] and not e.get('is_namespace')]
+    assert len(named_exports) >= 2, "Should find named exports"
+    
+    # Check default export
+    default_exports = [e for e in exports if e['is_default']]
+    assert len(default_exports) == 1, "Should find default export"
+    
+    # Check namespace export
+    namespace_exports = [e for e in exports if e.get('is_namespace')]
+    assert len(namespace_exports) == 1, "Should find namespace export"
+    
+    # Check re-exports
+    re_exports = [e for e in exports if e.get('is_re_export')]
+    assert len(re_exports) == 1, "Should find re-export"
+
+def test_import_variants(analyzer):
+    """Test parsing of different import types."""
+    import_code = """
+    // Default import
+    import name from './module';
+    
+    // Named imports
+    import { a, b, c } from './module';
+    
+    // Namespace import
+    import * as ns from './module';
+    
+    // Dynamic import
+    const module = await import('./module');
+    
+    // Import with assertions
+    import json from './data.json' assert { type: 'json' };
+    
+    // Mixed imports
+    import defaultExport, { named1, named2 } from './module';
+    """
+    
+    result = analyzer.analyze_code(import_code, language='javascript')
+    assert result is not None, "Analysis should return a result for import variants"
+    
+    # Verify imports
+    imports = result.get('imports', [])
+    assert len(imports) >= 6, "Should find all import variants"
+    
+    # Check default imports
+    default_imports = [i for i in imports if i['is_default'] and not i.get('names')]
+    assert len(default_imports) >= 2, "Should find default imports"
+    
+    # Check named imports
+    named_imports = [i for i in imports if i.get('names')]
+    assert len(named_imports) >= 2, "Should find named imports"
+    
+    # Check namespace imports
+    namespace_imports = [i for i in imports if i.get('is_namespace')]
+    assert len(namespace_imports) == 1, "Should find namespace import"
+    
+    # Check dynamic imports
+    dynamic_imports = [i for i in imports if i.get('is_dynamic')]
+    assert len(dynamic_imports) == 1, "Should find dynamic import"
+    
+    # Check imports with assertions
+    asserted_imports = [i for i in imports if i.get('assertions')]
+    assert len(asserted_imports) == 1, "Should find import with assertions"
+
+def test_edge_cases(analyzer):
+    """Test handling of edge cases and error conditions."""
+    # Test empty file
+    empty_code = ""
+    result = analyzer.analyze_code(empty_code, language='javascript')
+    assert result is not None, "Analysis should return a result for empty input"
+    assert not result.get('has_errors', False), "Empty input should not be treated as error"
+    
+    # Test file with only comments
+    comment_code = """
+    // This is a comment
+    /* This is a block comment */
+    """
+    result = analyzer.analyze_code(comment_code, language='javascript')
+    assert result is not None, "Analysis should return a result for comment-only input"
+    assert not result.get('has_errors', False), "Comment-only input should not be treated as error"
+    
+    # Test invalid UTF-8
+    invalid_utf8 = b'\x80invalid utf-8'
+    result = analyzer.analyze_code(invalid_utf8, language='javascript')
+    assert result is not None, "Analysis should return a result for invalid UTF-8"
+    assert result.get('has_errors', False), "Invalid UTF-8 should be treated as error"
+    
+    # Test very large input
+    large_code = "console.log('test');" * 10000
+    result = analyzer.analyze_code(large_code, language='javascript')
+    assert result is not None, "Analysis should return a result for large input"
+    
+    # Test non-existent file
+    result = analyzer.analyze_file("nonexistent.js", language='javascript')
+    assert result is not None, "Analysis should return a result for non-existent file"
+    assert result.get('has_errors', False), "Non-existent file should be treated as error"
+    
+    # Test file permission issues
+    import os
+    try:
+        with open("readonly.js", "w") as f:
+            f.write("console.log('test');")
+        os.chmod("readonly.js", 0o000)  # Remove all permissions
+        
+        result = analyzer.analyze_file("readonly.js", language='javascript')
+        assert result is not None, "Analysis should return a result for permission error"
+        assert result.get('has_errors', False), "Permission error should be treated as error"
+    finally:
+        # Clean up
+        try:
+            os.chmod("readonly.js", 0o644)  # Restore permissions
+            os.remove("readonly.js")
+        except:
+            pass
+
 # TODO: Add tests for syntax errors
 # TODO: Add tests for different JS features (async/await, exports variants, etc.) 

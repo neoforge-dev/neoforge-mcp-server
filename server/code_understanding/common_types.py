@@ -17,6 +17,7 @@ class MockNode:
     end_point: Tuple[int, int] = (0, 0)
     parent: Optional['MockNode'] = None # Optional parent link
     fields: Dict[str, Any] = field(default_factory=dict) # For named children/attributes
+    metadata: Dict[str, Any] = field(default_factory=dict) # For language-specific metadata
 
     def __post_init__(self):
         """Initialize optional fields."""
@@ -25,6 +26,8 @@ class MockNode:
             self.children = []
         if self.fields is None:
             self.fields = {}
+        if self.metadata is None:
+            self.metadata = {}
 
     def children_by_field_name(self, field_name: str) -> List["MockNode"]:
         """Get children associated with a specific field name."""
@@ -58,16 +61,41 @@ class MockNode:
 
 # Moved from parser.py to break circular import
 class MockTree:
-    """Mock tree structure holding the root MockNode."""
-
-    def __init__(self, root: Optional[MockNode] = None):
-        """Initialize mock tree.
-
+    """A unified abstract syntax tree representation."""
+    def __init__(self, root_node: Optional[MockNode] = None, has_errors: bool = False, error_details: Optional[List[Dict]] = None, features: Optional[Dict] = None):
+        """Initialize a MockTree.
+        
         Args:
-            root: Root MockNode
+            root_node: The root node of the tree.
+            has_errors: Whether the tree contains syntax errors.
+            error_details: List of error details if any.
+            features: Dictionary of language-specific features (functions, classes, exports, etc.).
         """
-        self.root_node = root
-        self.type = 'mock_tree' # Keep a type identifier if useful
+        self.root_node = root_node or MockNode(type='program', text='program')
+        self.has_errors = has_errors
+        self.error_details = error_details or []
+        self.features = features or {}
+
+    @property
+    def type(self) -> str:
+        """Get the type of the root node."""
+        return self.root_node.type if self.root_node else 'program'
+
+    def get(self, field_name: str) -> Optional[MockNode]:
+        """Get a field from the root node."""
+        return self.root_node.fields.get(field_name) if self.root_node else None
+
+    def __str__(self) -> str:
+        """String representation of the tree."""
+        return f"MockTree(type={self.type}, has_errors={self.has_errors}, error_count={len(self.error_details)})"
+
+    def __repr__(self) -> str:
+        """Get a detailed string representation of the tree.
+        
+        Returns:
+            str: A detailed string representation of the tree.
+        """
+        return str(self)
 
     def walk(self) -> Iterator[MockNode]:
         """Walk through all nodes in the tree (depth-first)."""

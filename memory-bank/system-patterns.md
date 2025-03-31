@@ -1373,4 +1373,220 @@ def test_process_reference(builder, sample_context):
    - File access
    - Cache access
    - Graph storage
-   - Result output 
+   - Result output
+
+## JavaScript Parsing Architecture
+
+### Components
+1. JavaScriptParserAdapter
+   - Main entry point for JavaScript parsing
+   - Uses tree-sitter for robust parsing
+   - Converts tree-sitter AST to MockTree
+   - Handles error reporting and validation
+
+2. Tree-sitter Integration
+   - Language definition from tree-sitter-javascript
+   - Query patterns for feature detection
+   - Build process for language library
+   - Path resolution for vendor files
+
+3. AST Conversion
+   - Tree-sitter Node → MockNode conversion
+   - Field handling for complex nodes
+   - Metadata for JavaScript features
+   - Source location tracking
+
+4. Error Handling
+   - Structured error details
+   - Line/column information
+   - Feature-specific errors
+   - Validation errors
+
+### Data Flow
+1. Input Processing
+   ```
+   JavaScript Code → UTF-8 Validation → Tree-sitter Parser → Tree-sitter AST
+   ```
+
+2. AST Conversion
+   ```
+   Tree-sitter AST → Node Type Detection → Field Processing → MockNode Creation
+   ```
+
+3. Feature Detection
+   ```
+   MockNode → Query Pattern Matching → Feature Metadata → Enhanced MockNode
+   ```
+
+4. Error Handling
+   ```
+   Validation → Error Collection → Structured Error Details → MockTree
+   ```
+
+### Key Patterns
+1. Adapter Pattern
+   - JavaScriptParserAdapter adapts tree-sitter to MockTree
+   - Provides unified interface for code understanding
+   - Handles language-specific features
+
+2. Visitor Pattern
+   - Tree traversal for AST conversion
+   - Feature detection during traversal
+   - Error collection during traversal
+
+3. Factory Pattern
+   - MockNode creation based on node type
+   - Feature-specific node creation
+   - Error node creation
+
+4. Strategy Pattern
+   - Different parsing strategies for different features
+   - Configurable error handling
+   - Extensible query patterns
+
+### Extension Points
+1. Query Patterns
+   - Add new patterns for feature detection
+   - Customize existing patterns
+   - Add language-specific patterns
+
+2. Node Types
+   - Add support for new node types
+   - Customize node conversion
+   - Add new metadata types
+
+3. Error Handling
+   - Add new error types
+   - Customize error reporting
+   - Add validation rules
+
+4. Feature Detection
+   - Add new feature detectors
+   - Customize feature metadata
+   - Add new feature types
+
+## Language Adapter Pattern
+The system uses a consistent adapter pattern for language-specific parsing:
+
+### Common Interface
+```python
+class LanguageAdapter:
+    def parse(self, code: str) -> MockTree:
+        """Parse code and return a MockTree with features."""
+        pass
+
+    def analyze(self, code: str) -> Dict[str, Any]:
+        """Analyze code and return extracted information."""
+        pass
+```
+
+### JavaScript Implementation
+- Uses tree-sitter for robust parsing
+- Handles modern ES2020+ features
+- Supports async/await patterns
+- Processes decorators and class fields
+- Provides detailed error handling
+- Includes comprehensive testing
+
+### Swift Implementation (Planned)
+- Will use tree-sitter for Swift parsing
+- Special handling for SwiftUI's declarative syntax
+- Support for property wrappers and protocols
+- Integration with Swift Package Manager
+- Cross-language analysis capabilities
+
+## Feature Extraction Pattern
+Each language adapter extracts common features:
+
+### Common Features
+- Imports/Exports
+- Functions/Methods
+- Classes/Structs
+- Variables/Properties
+- Dependencies
+
+### Language-Specific Features
+- JavaScript: ES6 modules, async/await, decorators
+- Swift: SwiftUI views, property wrappers, protocols
+
+## Error Handling Pattern
+Consistent error handling across adapters:
+
+### Error Structure
+```python
+{
+    'has_errors': bool,
+    'error_details': List[Dict[str, Any]],
+    'line': int,
+    'column': int,
+    'message': str
+}
+```
+
+### Error Categories
+1. Syntax Errors
+2. Parsing Errors
+3. Resolution Errors
+4. Analysis Errors
+
+## Testing Pattern
+Comprehensive testing approach:
+
+### Test Categories
+1. Unit Tests
+   - Parser functionality
+   - Feature extraction
+   - Error handling
+
+2. Integration Tests
+   - Package management
+   - Dependency analysis
+   - Cross-language features
+
+3. Performance Tests
+   - Parsing speed
+   - Memory usage
+   - Cache effectiveness
+
+## Package Management Pattern
+Consistent package management across languages:
+
+### Common Features
+- Dependency resolution
+- Version management
+- Script analysis
+- Build configuration
+
+### Language-Specific Features
+- JavaScript: npm/yarn/pnpm
+- Swift: SPM/CocoaPods
+
+## Dependency Analysis Pattern
+Unified dependency analysis approach:
+
+### Analysis Features
+- Module resolution
+- Circular dependency detection
+- Unused code detection
+- Dependency graph generation
+
+### Implementation Details
+- Caching mechanism
+- Parallel processing
+- Memory optimization
+- Error recovery
+
+## Cross-Language Integration Pattern
+Common patterns for language integration:
+
+### Shared Components
+- MockTree/MockNode infrastructure
+- Feature extraction
+- Error handling
+- Testing framework
+
+### Language-Specific Extensions
+- Custom parsers
+- Feature adapters
+- Package managers
+- Build systems 
