@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from server.code_understanding.analyzer import CodeAnalyzer
-from server.code_understanding.parser import MockNode, MockTree
+from server.code_understanding.common_types import MockNode, MockTree
 
 # Configure logging to show INFO level logs
 logging.basicConfig(level=logging.INFO) # Keep basic config as fallback

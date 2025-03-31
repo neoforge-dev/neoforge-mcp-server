@@ -1,0 +1,11 @@
+{
+  "plan": {
+    "fileProvider": "gemini",
+    "thinkingProvider": "perplexity",
+    "thinkingModel": "r1-1776"
+  },
+  "web": {
+    "provider": "gemini",
+    "model": "gemini-2.5-pro-exp"
+  }
+}

@@ -15,17 +15,12 @@ from .common_types import MockTree, MockNode
 logger = logging.getLogger(__name__)
 
 # Define Tree-sitter query strings (or load from .scm files)
-# Updated JS Import/Require Queries V5
-# Trying to combine default and named captures more reliably
+# --- Revised JS_IMPORT_QUERY V6 (Minimal) ---
 JS_IMPORT_QUERY = """
-(import_statement
-  source: (string) @source
-  [
-    (import_clause (identifier) @default_import)
-    (import_clause (named_imports (import_specifier name: (identifier) @named_import)*))
-  ]* @clauses
-)
+(import_statement source: (string) @source)
 """
+# --- End Revised Query V6 ---
+
 # Query for require() call - run on the call_expression node
 JS_REQUIRE_QUERY = """
 (call_expression
@@ -132,6 +127,10 @@ class JavaScriptParserAdapter:
             tree = self.parser.parse(bytes(code, 'utf8'))
             root_ts_node = tree.root_node
             
+            # ---- Remove Temporary Debugging ----
+            # logger.debug(f"Tree-sitter S-expression:\n{root_ts_node.sexp()}")
+            # ---- End Remove Temporary Debugging ----
+
             # Optional: Check for errors, but proceed anyway for partial analysis
             if root_ts_node.has_error:
                 logger.warning("JS Parsing resulted in errors. Analysis might be incomplete.")
@@ -156,6 +155,10 @@ class JavaScriptParserAdapter:
          if not ts_node:
              return None
 
+         # --- Add Entry Logging ---
+         logger.debug(f"_tree_sitter_to_mock_node processing: type={ts_node.type}, text='{ts_node.text.decode("utf-8")[:50]}...'")
+         # --- End Entry Logging ---
+
          node_type = ts_node.type
          # --- Program Node Handling --- 
          if node_type == 'program':
@@ -179,25 +182,35 @@ class JavaScriptParserAdapter:
          elif node_type == 'variable_declarator':
              return self._convert_variable_declarator(ts_node)
          elif node_type == 'function_declaration':
-             return self._convert_function_definition(ts_node)
+             converted_node = self._convert_function_definition(ts_node)
+             # --- Add return value logging ---
+             if converted_node:
+                 logger.debug(f"_convert_function_definition returned: type={converted_node.type}, name={converted_node.fields.get('name')}")
+             else:
+                 logger.debug(f"_convert_function_definition returned None")
+             # --- End logging ---
+             return converted_node
          elif node_type == 'class_declaration':
              return self._convert_class_definition(ts_node)
          elif node_type == 'method_definition':
-              return self._convert_function_definition(ts_node) # Reuse func helper
+              return self._convert_function_definition(ts_node)
          elif node_type == 'export_statement':
              return self._convert_export_statement(ts_node)
          # Arrow functions are usually values, handled in _convert_variable_declarator
          # If encountered elsewhere, convert generically? Or return None?
-         elif node_type == 'arrow_function':
-              return None # Skip standalone arrow funcs for now
+         # elif node_type == 'arrow_function':
+         #     # Let _convert_variable_declarator handle these primarily
+         #     # If needed for other contexts, call _convert_arrow_function here
+         #     pass # Or return self._convert_arrow_function(ts_node) ?
          else:
              # Default: Convert generically ONLY if not handled above
+             # Add logging before generic conversion
              return self._convert_node_generically(ts_node)
 
     # --- Refactored Helper Methods --- 
     
     def _convert_import_statement(self, ts_node: Node) -> Optional[MockNode]:
-         """Converts a tree-sitter import_statement node."""
+         """Converts a tree-sitter import_statement node using minimal query and Python AST traversal."""
          if ts_node.type != 'import_statement': return None
          
          mock_type = 'import_statement'
@@ -205,36 +218,60 @@ class JavaScriptParserAdapter:
          end_point=ts_node.end_point
          children = [] 
          fields = {}
-         source = "<unknown>"
+         source = None
          default_import_name = None
          named_imports = []
+         namespace_import_name = None 
          
+         # Run the minimal query just to get the source reliably
          captures = self.import_query.captures(ts_node)
-         logger.debug(f"JS Import Captures ({ts_node.start_point}): {[(c[1], c[0].text) for c in captures]}")
-         for captured_node, capture_name in captures:
-             cap_text = captured_node.text.decode('utf-8')
-             if capture_name == 'source': 
-                 source = cap_text.strip('\'"')
-                 fields['module'] = source 
-             elif capture_name == 'default_import': 
-                 default_import_name = cap_text
-                 children.append(MockNode(type='identifier', text=cap_text))
-                 fields['is_default'] = True 
-             elif capture_name == 'named_import': 
-                 named_imports.append(cap_text)
-                 children.append(MockNode(type='identifier', text=cap_text))
+         logger.debug(f"JS Import Captures V6 ({ts_node.start_point}): {[(c[1], c[0].type) for c in captures]}")
          
-         node_text = source 
-         if default_import_name:
-             fields['default_name'] = default_import_name 
-         if named_imports:
-             fields['named_names'] = named_imports 
-             
-         if fields.get('module'):
-              return MockNode(type=mock_type, text=node_text, start_point=start_point, end_point=end_point, children=children, fields=fields)
-         else:
-              logger.warning(f"Could not extract source from import statement node: {ts_node.text.decode()}")
-              return None
+         for captured_node, capture_name in captures:
+             if capture_name == 'source': 
+                 source = captured_node.text.decode('utf-8').strip('\'"')
+                 fields['module'] = source
+                 break # Source found
+
+         if source is None:
+             logger.warning(f"Could not extract source from import statement: {ts_node.text.decode()}")
+             return None
+
+         # Now, manually find the import_clause node among children
+         clause_node = next((c for c in ts_node.children if c.type == 'import_clause'), None)
+         
+         is_side_effect_only = True # Assume side-effect until clause processed
+         if clause_node:
+             logger.debug(f"Processing clause node: type={clause_node.type}")
+             is_side_effect_only = False
+             # Check children of the clause node
+             for child in clause_node.children:
+                  if child.type == 'identifier': # Default import
+                       default_import_name = child.text.decode('utf-8')
+                       fields['default_name'] = default_import_name
+                  elif child.type == 'named_imports': # Named imports
+                       for named_child in child.children:
+                            if named_child.type == 'import_specifier':
+                                 for spec_child in named_child.children:
+                                      if spec_child.type == 'identifier':
+                                           named_imports.append(spec_child.text.decode('utf-8'))
+                       if named_imports:
+                            fields['named_names'] = named_imports
+                  elif child.type == 'namespace_import': # Namespace import
+                       for ns_child in child.children:
+                            if ns_child.type == 'identifier':
+                                 namespace_import_name = ns_child.text.decode('utf-8')
+                                 fields['namespace_name'] = namespace_import_name
+
+         # Create the MockNode with all fields
+         return MockNode(
+             type=mock_type,
+             text=ts_node.text.decode('utf-8'),
+             start_point=start_point,
+             end_point=end_point,
+             children=children,
+             fields=fields
+         )
 
     def _create_require_mock_node(self, declarator_node: Node, captures: list) -> Optional[MockNode]:
           """Creates a require_statement MockNode from captures and the declarator node."""
@@ -277,15 +314,25 @@ class JavaScriptParserAdapter:
         end_point=ts_node.end_point
         children = []
         fields = {}
-        node_text = "<anonymous_func>"
+        # Initialize node_text with a default
+        node_text = "<anonymous_func>" 
+        func_name = None
         
         name_node_ts = ts_node.child_by_field_name('name')
         params_node_ts = ts_node.child_by_field_name('parameters')
         body_node_ts = ts_node.child_by_field_name('body')
         
         if name_node_ts: 
-            fields['name'] = self._convert_node_generically(name_node_ts)
-            if fields['name']: node_text = fields['name'].text
+            # Extract the name string directly
+            func_name = name_node_ts.text.decode('utf-8')
+            # Set node_text to the function name if found
+            node_text = func_name 
+            # Store the name string in fields
+            fields['name'] = func_name 
+            # Optionally add the identifier node as a child if needed elsewhere
+            # name_mock = self._convert_node_generically(name_node_ts)
+            # if name_mock: children.append(name_mock)
+            
         if ts_node.type == 'method_definition' and 'static' in [c.type for c in ts_node.children]:
             fields['is_static'] = True
         if params_node_ts: 
@@ -299,16 +346,19 @@ class JavaScriptParserAdapter:
         
     def _convert_arrow_function(self, ts_node: Node, assigned_name: Optional[str]=None) -> Optional[MockNode]:
          """Converts an arrow_function node."""
-         # Usually found as value in variable_declarator
          if ts_node.type != 'arrow_function': return None
          
-         mock_type = 'function_definition' # Treat as function
+         mock_type = 'function_definition'
          start_point=ts_node.start_point
          end_point=ts_node.end_point
          children = []
          fields = {}
+         # Use assigned_name directly for node_text and fields['name']
          node_text = assigned_name or "<anonymous_arrow>"
-         if assigned_name: fields['name'] = MockNode(type='identifier', text=assigned_name)
+         if assigned_name: 
+             fields['name'] = assigned_name 
+             # Optionally add identifier node as child
+             # children.append(MockNode(type='identifier', text=assigned_name))
          
          params_node_ts = ts_node.child_by_field_name('parameters')
          body_node_ts = ts_node.child_by_field_name('body')
@@ -322,26 +372,37 @@ class JavaScriptParserAdapter:
          return MockNode(type=mock_type, text=node_text, start_point=start_point, end_point=end_point, children=children, fields=fields)
          
     def _convert_class_definition(self, ts_node: Node) -> Optional[MockNode]:
-         """Converts a class_declaration node."""
-         if ts_node.type != 'class_declaration': return None
-         
-         mock_type = 'class_definition'
-         start_point=ts_node.start_point
-         end_point=ts_node.end_point
-         children = []
-         fields = {}
-         node_text = "<anonymous_class>"
-         
-         name_node_ts = ts_node.child_by_field_name('name')
-         body_node_ts = ts_node.child_by_field_name('body') 
-         if name_node_ts: 
-             fields['name'] = self._convert_node_generically(name_node_ts)
-             if fields['name']: node_text = fields['name'].text
-         if body_node_ts: 
-             body_mock = self._convert_node_generically(body_node_ts)
-             if body_mock: children.append(body_mock)
-             
-         return MockNode(type=mock_type, text=node_text, start_point=start_point, end_point=end_point, children=children, fields=fields)
+        """Converts a class_declaration node."""
+        if ts_node.type != 'class_declaration': return None
+        
+        mock_type = 'class_definition'
+        start_point=ts_node.start_point
+        end_point=ts_node.end_point
+        children = []
+        fields = {}
+        node_text = "<anonymous_class>"
+        
+        name_node_ts = ts_node.child_by_field_name('name')
+        body_node_ts = ts_node.child_by_field_name('body') 
+        if name_node_ts: 
+            name_mock = self._convert_node_generically(name_node_ts)
+            if name_mock:
+                children.append(name_mock)
+                fields['name'] = name_mock.text  # Store the name text directly
+                node_text = name_mock.text
+        if body_node_ts: 
+            body_mock = self._convert_node_generically(body_node_ts)
+            if body_mock:
+                children.append(body_mock)
+                fields['body'] = body_mock  # Add body to fields as well
+                # Convert method definitions
+                for child in body_node_ts.children:
+                    if child.type == 'method_definition':
+                        method_mock = self._convert_function_definition(child)
+                        if method_mock:
+                            children.append(method_mock)
+            
+        return MockNode(type=mock_type, text=node_text, start_point=start_point, end_point=end_point, children=children, fields=fields)
 
     def _convert_variable_declaration(self, ts_node: Node) -> Optional[MockNode]:
          """Converts variable_declaration or lexical_declaration.
@@ -375,10 +436,43 @@ class JavaScriptParserAdapter:
 
         # --- Check for require --- 
         if value_node_ts and value_node_ts.type == 'call_expression':
-            captures = self.require_query.captures(value_node_ts) 
-            if captures:
-                # Pass the name and source from captures and declarator node
-                return self._create_require_mock_node(ts_node, captures)
+            # Check if this is a require call
+            callee = value_node_ts.child_by_field_name('function')
+            args = value_node_ts.child_by_field_name('arguments')
+            
+            if callee and callee.type == 'identifier' and callee.text.decode('utf-8') == 'require':
+                # Find the module string in the arguments
+                module = None
+                if args:
+                    for arg in args.children:
+                        if arg.type == 'string':
+                            module = arg.text.decode('utf-8').strip('"\'')
+                            break
+                
+                if module:
+                    # Create a require_statement node
+                    mock_type = 'variable_declarator'
+                    start_point = ts_node.start_point
+                    end_point = ts_node.end_point
+                    children = []
+                    fields = {
+                        'name': assigned_name,
+                        'module': module,
+                        'type': 'require'
+                    }
+                    
+                    if assigned_name:
+                        children.append(MockNode(type='identifier', text=assigned_name))
+                    children.append(MockNode(type='string', text=module))
+                    
+                    return MockNode(
+                        type=mock_type,
+                        text=f"require('{module}')",
+                        start_point=start_point,
+                        end_point=end_point,
+                        children=children,
+                        fields=fields
+                    )
                 
         # --- Check for arrow function --- 
         if value_node_ts and value_node_ts.type == 'arrow_function':
@@ -392,11 +486,15 @@ class JavaScriptParserAdapter:
 
         if name_node_ts:
              name_mock = self._convert_node_generically(name_node_ts)
-             if name_mock: fields['name'] = name_mock
+             if name_mock: 
+                 children.append(name_mock)
+                 fields['name'] = name_mock.text  # Store the name text directly
                   
         if value_node_ts:
             value_mock = self._convert_node_generically(value_node_ts)
-            if value_mock: fields['value'] = value_mock
+            if value_mock: 
+                children.append(value_mock)
+                fields['value'] = value_mock
                      
         return MockNode(type=mock_type, text=node_text, start_point=start_point, end_point=end_point, children=children, fields=fields)
         

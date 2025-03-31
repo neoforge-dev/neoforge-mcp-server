@@ -4,219 +4,215 @@ import ast
 import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union, Any, Iterator
+from pathlib import Path
+from .language_adapters import JavaScriptParserAdapter, SwiftParserAdapter
+from .common_types import MockNode, MockTree
 
 logger = logging.getLogger(__name__)
 
 # Names to ignore when processing symbols
 IGNORED_NAMES = {'self', 'cls', 'None', 'True', 'False'}
 
-@dataclass
-class MockNode:
-    """Mock AST node for testing."""
-    type: str
-    text: str = ""
-    children: List["MockNode"] = field(default_factory=list)
-    start_point: Tuple[int, int] = (0, 0)
-    end_point: Tuple[int, int] = (0, 0)
-    parent: Optional['MockNode'] = None
-    fields: Dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self):
-        """Initialize optional fields."""
-        if self.children is None:
-            self.children = []
-        if self.fields is None:
-            self.fields = {}
-
-    def children_by_field_name(self, field_name: str) -> List["MockNode"]:
-        """Get children by field name."""
-        if field_name == 'body':
-            if 'body' in self.fields:
-                return self.fields['body']
-            # For function and class definitions, return children
-            if self.type in ('function_definition', 'class_definition', 'module'):
-                return self.children
-        elif field_name == 'parameters' and self.type == 'function_definition':
-            params = [child for child in self.children if child.type == 'parameters']
-            return params[0].children if params else []
-        elif field_name == 'bases' and self.type == 'class_definition':
-            bases = [child for child in self.children if child.type == 'bases']
-            return bases[0].children if bases else []
-        return []
-
-    def child_by_field_name(self, field_name: str) -> Optional["MockNode"]:
-        """Get child by field name."""
-        return self.fields.get(field_name)
-
-    def walk(self) -> Iterator["MockNode"]:
-        """Walk through the node and its children."""
-        yield self
-        for child in self.children:
-            yield from child.walk()
-
-class MockTree:
-    """Mock tree for testing."""
-
-    def __init__(self, root: Optional[MockNode] = None):
-        """Initialize mock tree.
-
-        Args:
-            root: Root node
-        """
-        self.root_node = root
-        self.type = 'mock_tree'
-
-    def walk(self):
-        """Walk through the tree."""
-        if self.root_node:
-            return self.root_node.walk()
-        else:
-            return iter([])
-
 class CodeParser:
     """Parser for Python code."""
 
     def __init__(self):
-        """Initialize the parser."""
-        self.language = None
-        self.parser = None
-        self.try_load_parser()
+        """Initialize the parser and load language support."""
+        # Initialize ALL attributes first
+        self.py_language = None
+        self.py_parser = None
+        self.adapters: Dict[str, Any] = {}
+        self.mock_parser = None # Initialize mock_parser early
+        
+        # Now load parsers and adapters
+        self._try_load_py_parser()
+        self._try_load_adapters()
+        
+        # Ensure mock is set up if Python parser failed during _try_load_py_parser
+        # This check might now be redundant if _try_load_py_parser handles it,
+        # but it's safe to leave for robustness or remove if confident.
+        if not self.py_parser or not self.py_language:
+             self._setup_mock_parser_fallback()
 
-    def try_load_parser(self):
-        """Try to load the parser."""
+    def _try_load_py_parser(self):
+        """Try to load the Tree-sitter Python parser."""
         try:
             from tree_sitter import Parser, Language
-            self.parser = Parser()
+            self.py_parser = Parser()
+            # Assuming build_languages put python.so in the right place
             try:
-                from . import LANGUAGE_LIB_PATH
-                if LANGUAGE_LIB_PATH:
-                    self.language = Language(LANGUAGE_LIB_PATH, 'python')
-                    try:
-                        self.parser.set_language(self.language)
-                    except ValueError as e:
-                        if "Incompatible Language version" in str(e):
-                            logger.warning("Tree-sitter language version mismatch, falling back to mock parser")
-                            self._use_mock_parser()
-                            return
-                        raise
-            except ImportError:
-                logger.warning("Tree-sitter language library not found, falling back to mock parser")
-                self._use_mock_parser()
+                # Adjust path as needed, e.g., using build/python.so or vendor
+                py_lang_path = Path(__file__).parent / 'build' / 'python.so' 
+                if py_lang_path.exists():
+                    self.py_language = Language(str(py_lang_path), 'python')
+                    self.py_parser.set_language(self.py_language)
+                    logger.info("Tree-sitter Python parser loaded successfully.")
+                else:
+                    logger.warning("Python tree-sitter grammar not found at expected location.")
+                    self._setup_mock_parser_fallback() # Setup mock if python fails
+            except Exception as e:
+                logger.warning(f"Failed to load Python Tree-sitter grammar: {e}")
+                self._setup_mock_parser_fallback()
+        except ImportError:
+            logger.warning("tree_sitter library not found.")
+            self._setup_mock_parser_fallback()
         except Exception as e:
-            logger.warning(f"Failed to load tree-sitter parser: {e}, falling back to mock parser")
-            self._use_mock_parser()
+            logger.warning(f"Error initializing Python parser: {e}")
+            self._setup_mock_parser_fallback()
+            
+    def _try_load_adapters(self):
+        """Try to load adapters for other languages."""
+        try:
+            js_adapter = JavaScriptParserAdapter()
+            if js_adapter.language: # Check if language loaded successfully
+                 self.adapters['javascript'] = js_adapter
+                 logger.info("JavaScriptParserAdapter loaded successfully.")
+            else:
+                 logger.warning("JavaScriptParserAdapter initialized but language failed to load.")
+        except Exception as e:
+            logger.error(f"Failed to initialize JavaScriptParserAdapter: {e}")
+            
+        try:
+            # Add Swift or other adapters similarly
+            # swift_adapter = SwiftParserAdapter()
+            # self.adapters['swift'] = swift_adapter
+            # logger.info("SwiftParserAdapter loaded.")
+            pass
+        except Exception as e:
+            logger.error(f"Failed to initialize other language adapters: {e}")
 
-    def _use_mock_parser(self):
-        """Use a mock parser for testing."""
-        from .mock_parser import MockParser
-        self.parser = MockParser()
-        self.language = None
+    def _setup_mock_parser_fallback(self):
+        """Use a mock parser for testing or when tree-sitter fails."""
+        if not self.mock_parser:
+             try:
+                 from .mock_parser import MockParser
+                 self.mock_parser = MockParser()
+                 logger.info("Initialized MockParser fallback.")
+             except ImportError:
+                  logger.error("Failed to import MockParser for fallback.")
+                  self.mock_parser = None # Ensure it's None
 
-    def parse(self, code: str) -> Union[Any, MockTree]:
-        """Parse Python code.
+    def parse(self, code: str, language: str = 'python') -> Optional[MockTree]:
+        """Parse code using the appropriate parser based on language.
 
         Args:
-            code: Python source code
+            code: Source code string.
+            language: The programming language (e.g., 'python', 'javascript').
 
         Returns:
-            Syntax tree (either tree-sitter Tree or MockTree)
-
-        Raises:
-            ValueError: If code is invalid
+            MockTree: A unified abstract syntax tree representation, or None on failure.
         """
-        try:
-            # First validate syntax
-            ast.parse(code)
-        except SyntaxError as e:
-            raise ValueError(f"Invalid Python code: {e}")
-
-        try:
-            # If tree-sitter is available and configured
-            if self.parser and self.language: 
-                tree = self.parser.parse(bytes(code, 'utf8'))
-                # Convert tree-sitter tree to a compatible MockTree structure
-                # NOTE: We might want a different return type if tree-sitter succeeds,
-                # but for now, let's assume we want a consistent MockTree output.
-                # If _tree_sitter_to_mock_tree exists and works, use it.
-                # Otherwise, maybe fall back or raise an error?
-                # For now, let's assume _tree_sitter_to_mock_tree is desired path.
-                # This conversion might need review later.
-                mock_root = self._tree_sitter_to_mock_tree(tree)
-                return MockTree(root=mock_root) # Wrap in MockTree
-            
-            # If tree-sitter is NOT available (language is None), 
-            # but self.parser is set (it should be MockParser instance)
-            elif self.parser and not self.language:
-                logger.info("CodeParser: Using self.parser (MockParser instance) to parse.")
-                # Call the parse method of the MockParser instance
-                return self.parser.parse(code) 
+        selected_parser = None
+        is_adapter = False
+        
+        if language == 'python':
+            if self.py_parser and self.py_language:
+                 selected_parser = self.py_parser
+            elif self.mock_parser: # Use mock parser if Python tree-sitter failed
+                 logger.warning("Using MockParser for Python due to Tree-sitter load failure.")
+                 selected_parser = self.mock_parser
+                 is_adapter = True # MockParser has a parse() -> MockTree method
             else:
-                 # This case should ideally not happen if try_load_parser is robust
-                 logger.error("CodeParser: Parser state inconsistent (parser or language missing without fallback). Falling back to basic AST parse.")
-                 return self._mock_parse(code) # Keep internal AST parse as last resort
+                 logger.error("No Python parser (Tree-sitter or Mock) available.")
+                 return None
+        elif language in self.adapters:
+            selected_parser = self.adapters[language]
+            is_adapter = True # Adapters (and MockParser) return MockTree directly
+            logger.info(f"Using {type(selected_parser).__name__} for language: {language}")
+        else:
+             # Optional: Fallback to mock parser for unsupported languages if desired?
+             # if self.mock_parser:
+             #    logger.warning(f"Language '{language}' not supported by specific adapters, attempting MockParser fallback.")
+             #    selected_parser = self.mock_parser
+             #    is_adapter = True
+             # else:
+             logger.error(f"No parser adapter found for language: {language}")
+             return None
+
+        if not selected_parser:
+             logger.error(f"Parser selection failed for language: {language}")
+             return None
+
+        # Pre-parsing validation block
+        try:
+            # Validate syntax using Python's ast (ONLY for Python)
+            if language == 'python':
+                ast.parse(code)
+            # No pre-validation for other languages currently
+        except SyntaxError as e:
+            logger.error(f"Syntax error detected by pre-parser validation for {language}: {e}")
+            raise ValueError(f"Invalid {language} code: {e}") # Reraise for analyzer
+        except Exception as e:
+            logger.warning(f"Pre-parse validation step failed for {language}: {e}")
+            # Proceeding, assuming the actual parser might handle it
+
+        # Actual parsing block
+        try:
+            if is_adapter:
+                # Ensure the selected parser (adapter) is actually called
+                logger.debug(f"Calling {type(selected_parser).__name__}.parse() for {language}")
+                return selected_parser.parse(code)
+            else: # Assume Tree-sitter parser for Python
+                 # This block should only execute if language == 'python' and py_parser is valid
+                 logger.debug(f"Calling tree-sitter parse() for {language}")
+                 if isinstance(code, str):
+                     code_bytes = bytes(code, 'utf8')
+                 else:
+                      code_bytes = code # Assume bytes if not str
+                 tree = selected_parser.parse(code_bytes)
+                 # Convert tree-sitter tree to MockTree
+                 mock_root = self._tree_sitter_to_mock_tree(tree)
+                 return MockTree(root=mock_root)
 
         except Exception as e:
-            logger.warning(f"CodeParser: Parsing failed with {type(self.parser).__name__}, falling back to internal mock parse: {e}")
-            # Fallback to the internal basic AST parse if the primary/mock parser fails
-            return self._mock_parse(code)
+            logger.exception(f"Parsing failed with {type(selected_parser).__name__} for {language}: {e}")
+            return None # Return None on parsing failure
 
     def _tree_sitter_to_mock_tree(self, tree: Any) -> Any:
-        """Convert tree-sitter tree to mock tree.
+         """Convert tree-sitter tree to mock node structure (root)."""
+         # This needs careful implementation to map TS nodes to MockNodes
+         # It was previously returning the root node directly, ensure it returns MockNode
+         # Placeholder - reuse the recursive helper concept
+         return self._convert_ts_node_recursive(tree.root_node)
+         
+    def _convert_ts_node_recursive(self, node):
+        """Recursive helper to convert tree-sitter node to MockNode."""
+        if not node:
+            return None
+            
+        text = node.text.decode('utf8') if hasattr(node.text, 'decode') else str(node.text)
         
-        Args:
-            tree: Tree-sitter tree
-            
-        Returns:
-            Mock tree
-        """
-        def convert_node(node):
-            """Convert a single node."""
-            if not node:
-                return None
-                
-            # Get node text
-            text = node.text.decode('utf8') if hasattr(node.text, 'decode') else str(node.text)
-            
-            # Create mock node
-            mock_node = MockNode(
-                type=node.type,
-                text=text,
-                start_point=node.start_point,
-                end_point=node.end_point
-            )
-            
-            # Process children
-            for child in node.children:
-                child_mock = convert_node(child)
-                if child_mock:
-                    child_mock.parent = mock_node
-                    mock_node.children.append(child_mock)
-                    
-                    # Handle special fields
-                    if child.type == 'identifier':
-                        if child.parent.type == 'function_definition':
-                            mock_node.fields['name'] = child_mock
-                        elif child.parent.type == 'class_definition':
-                            mock_node.fields['name'] = child_mock
-                        elif child.parent.type == 'argument_list':
-                            # This is a base class
-                            if 'bases' not in mock_node.fields:
-                                mock_node.fields['bases'] = MockNode(type='bases', children=[])
-                            mock_node.fields['bases'].children.append(child_mock)
-                    elif child.type == 'parameters':
-                        mock_node.fields['parameters'] = child_mock
-                    elif child.type == 'body':
-                        mock_node.fields['body'] = child_mock
-                    elif child.type == 'bases':
-                        mock_node.fields['bases'] = child_mock
-                    elif child.type == 'left':
-                        mock_node.fields['left'] = child_mock
-                    elif child.type == 'right':
-                        mock_node.fields['right'] = child_mock
+        # Basic type mapping - should be language specific? Adapter handles this now.
+        # Keep a generic mapping here?
+        mock_type = node.type
+
+        mock_node = MockNode(
+            type=mock_type,
+            text=text,
+            start_point=node.start_point,
+            end_point=node.end_point,
+            children=[],
+            fields={}
+        )
+        
+        # Process children recursively
+        for field_name, child_node in node.children_by_field_name().items():
+             # How Tree-sitter handles fields vs children needs clarification
+             # Assuming children_by_field_name gives named children
+             mock_child = self._convert_ts_node_recursive(child_node)
+             if mock_child:
+                  mock_node.fields[field_name] = mock_child
+                  # Should they also be in children list? Depends on MockNode usage.
+                  # mock_node.children.append(mock_child) 
+                  
+        for child_node in node.children: # Iterate unnamed children? Check tree-sitter API
+             mock_child = self._convert_ts_node_recursive(child_node)
+             if mock_child:
+                 # Avoid duplicating named children if they are also in .children
+                 if field_name not in mock_node.fields or mock_node.fields[field_name] != mock_child:
+                      mock_node.children.append(mock_child)
                         
-            return mock_node
-            
-        return convert_node(tree.root_node)
+        return mock_node
 
     def _mock_parse(self, code: str) -> MockTree:
         """Create a mock syntax tree for testing.

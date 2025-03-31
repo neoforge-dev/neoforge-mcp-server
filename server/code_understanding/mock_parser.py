@@ -4,30 +4,10 @@ from typing import Any, Optional, List, Dict, Tuple
 import ast
 import logging
 
+# Import common types
+from .common_types import MockNode, MockTree
+
 logger = logging.getLogger(__name__)
-
-class MockNode:
-    """Mock node for testing."""
-    def __init__(self, type: str, text: str = "", start_point: tuple = (0, 0), end_point: tuple = (0, 0), children: List['MockNode'] = None, fields: Dict[str, Any] = None):
-        self.type = type
-        self.text = text
-        self.start_point = start_point
-        self.end_point = end_point
-        self.children = children or []
-        self.fields = fields or {}
-
-    def child_by_field_name(self, name: str) -> Optional['MockNode']:
-        """Get child by field name."""
-        return next((child for child in self.children if child.type == name), None)
-
-    def children_by_field_name(self, name: str) -> List['MockNode']:
-        """Get children by field name."""
-        return [child for child in self.children if child.type == name]
-
-class MockTree:
-    """Mock tree for testing."""
-    def __init__(self, root_node: MockNode):
-        self.root_node = root_node
 
 class MockParser:
     """Mock parser for testing."""
