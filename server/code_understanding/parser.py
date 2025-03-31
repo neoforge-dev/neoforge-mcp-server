@@ -55,13 +55,23 @@ class MockNode:
             yield from child.walk()
 
 class MockTree:
-    """Mock syntax tree for testing."""
-    def __init__(self, root: MockNode):
+    """Mock tree for testing."""
+
+    def __init__(self, root: Optional[MockNode] = None):
+        """Initialize mock tree.
+
+        Args:
+            root: Root node
+        """
         self.root_node = root
+        self.type = 'mock_tree'
 
     def walk(self):
         """Walk through the tree."""
-        return self.root_node.walk()
+        if self.root_node:
+            return self.root_node.walk()
+        else:
+            return iter([])
 
 class CodeParser:
     """Parser for Python code."""
@@ -81,11 +91,26 @@ class CodeParser:
                 from . import LANGUAGE_LIB_PATH
                 if LANGUAGE_LIB_PATH:
                     self.language = Language(LANGUAGE_LIB_PATH, 'python')
-                    self.parser.set_language(self.language)
+                    try:
+                        self.parser.set_language(self.language)
+                    except ValueError as e:
+                        if "Incompatible Language version" in str(e):
+                            logger.warning("Tree-sitter language version mismatch, falling back to mock parser")
+                            self._use_mock_parser()
+                            return
+                        raise
             except ImportError:
-                logger.warning("Language library not found, using mock parser")
-        except ImportError:
-            logger.warning("tree-sitter not available, using mock parser")
+                logger.warning("Tree-sitter language library not found, falling back to mock parser")
+                self._use_mock_parser()
+        except Exception as e:
+            logger.warning(f"Failed to load tree-sitter parser: {e}, falling back to mock parser")
+            self._use_mock_parser()
+
+    def _use_mock_parser(self):
+        """Use a mock parser for testing."""
+        from .mock_parser import MockParser
+        self.parser = MockParser()
+        self.language = None
 
     def parse(self, code: str) -> Union[Any, MockTree]:
         """Parse Python code.
@@ -106,13 +131,33 @@ class CodeParser:
             raise ValueError(f"Invalid Python code: {e}")
 
         try:
-            if self.parser and self.language:
+            # If tree-sitter is available and configured
+            if self.parser and self.language: 
                 tree = self.parser.parse(bytes(code, 'utf8'))
-                return self._tree_sitter_to_mock_tree(tree)
+                # Convert tree-sitter tree to a compatible MockTree structure
+                # NOTE: We might want a different return type if tree-sitter succeeds,
+                # but for now, let's assume we want a consistent MockTree output.
+                # If _tree_sitter_to_mock_tree exists and works, use it.
+                # Otherwise, maybe fall back or raise an error?
+                # For now, let's assume _tree_sitter_to_mock_tree is desired path.
+                # This conversion might need review later.
+                mock_root = self._tree_sitter_to_mock_tree(tree)
+                return MockTree(root=mock_root) # Wrap in MockTree
+            
+            # If tree-sitter is NOT available (language is None), 
+            # but self.parser is set (it should be MockParser instance)
+            elif self.parser and not self.language:
+                logger.info("CodeParser: Using self.parser (MockParser instance) to parse.")
+                # Call the parse method of the MockParser instance
+                return self.parser.parse(code) 
             else:
-                return self._mock_parse(code)
+                 # This case should ideally not happen if try_load_parser is robust
+                 logger.error("CodeParser: Parser state inconsistent (parser or language missing without fallback). Falling back to basic AST parse.")
+                 return self._mock_parse(code) # Keep internal AST parse as last resort
+
         except Exception as e:
-            logger.warning(f"Tree-sitter parsing failed, falling back to mock parser: {e}")
+            logger.warning(f"CodeParser: Parsing failed with {type(self.parser).__name__}, falling back to internal mock parse: {e}")
+            # Fallback to the internal basic AST parse if the primary/mock parser fails
             return self._mock_parse(code)
 
     def _tree_sitter_to_mock_tree(self, tree: Any) -> Any:
@@ -153,6 +198,11 @@ class CodeParser:
                             mock_node.fields['name'] = child_mock
                         elif child.parent.type == 'class_definition':
                             mock_node.fields['name'] = child_mock
+                        elif child.parent.type == 'argument_list':
+                            # This is a base class
+                            if 'bases' not in mock_node.fields:
+                                mock_node.fields['bases'] = MockNode(type='bases', children=[])
+                            mock_node.fields['bases'].children.append(child_mock)
                     elif child.type == 'parameters':
                         mock_node.fields['parameters'] = child_mock
                     elif child.type == 'body':
@@ -190,328 +240,66 @@ class CodeParser:
         Returns:
             MockNode object or list of MockNode objects
         """
-        if node is None:
-            return MockNode(
-                type='unknown',
-                text='',
-                start_point=(0, 0),
-                end_point=(0, 0)
-            )
-
-        # Handle module nodes
         if isinstance(node, ast.Module):
-            mock_node = MockNode(
-                type='module',
-                text='',
-                start_point=(0, 0),
-                end_point=(0, 0)
-            )
-            body_children = []
+            children = []
             for child in node.body:
-                result = self._ast_to_mock_node(child)
-                if isinstance(result, list):
-                    for r in result:
-                        r.parent = mock_node
-                        body_children.append(r)
+                child_node = self._ast_to_mock_node(child)
+                if isinstance(child_node, list):
+                    children.extend(child_node)
                 else:
-                    result.parent = mock_node
-                    body_children.append(result)
-            mock_node.children = body_children
-            return mock_node
-
-        # Handle import nodes
-        if isinstance(node, ast.Import):
-            imports = []
-            for name in node.names:
-                import_node = MockNode(
-                    type='import_statement',
-                    text=f'import {name.name}',
-                    start_point=(node.lineno - 1, node.col_offset),
-                    end_point=(node.end_lineno - 1, node.end_col_offset)
-                )
-                # Add dotted_name node
-                dotted_name = MockNode(
-                    type='dotted_name',
-                    text=name.name,
-                    start_point=(node.lineno - 1, node.col_offset + 7),  # After 'import '
-                    end_point=(node.end_lineno - 1, node.end_col_offset)
-                )
-                dotted_name.parent = import_node
-                import_node.children.append(dotted_name)
-
-                # Add alias node if present
-                if name.asname:
-                    alias_node = MockNode(
-                        type='identifier',
-                        text=name.asname,
-                        start_point=(node.lineno - 1, node.col_offset + 7 + len(name.name) + 4),  # After 'import name as '
-                        end_point=(node.end_lineno - 1, node.end_col_offset)
-                    )
-                    alias_node.parent = import_node
-                    import_node.children.append(alias_node)
-
-                imports.append(import_node)
-            return imports
-
-        if isinstance(node, ast.ImportFrom):
-            imports = []
-            for name in node.names:
-                import_node = MockNode(
-                    type='import_from_statement',
-                    text=f'from {node.module} import {name.name}',
-                    start_point=(node.lineno - 1, node.col_offset),
-                    end_point=(node.end_lineno - 1, node.end_col_offset)
-                )
-                # Add module dotted_name node
-                module_name = MockNode(
-                    type='dotted_name',
-                    text=node.module,
-                    start_point=(node.lineno - 1, node.col_offset + 5),  # After 'from '
-                    end_point=(node.lineno - 1, node.col_offset + 5 + len(node.module))
-                )
-                module_name.parent = import_node
-                import_node.children.append(module_name)
-
-                # Add imported symbol dotted_name node
-                symbol_name = MockNode(
-                    type='dotted_name',
-                    text=name.name,
-                    start_point=(node.lineno - 1, node.col_offset + 5 + len(node.module) + 8),  # After 'from module import '
-                    end_point=(node.lineno - 1, node.col_offset + 5 + len(node.module) + 8 + len(name.name))
-                )
-                symbol_name.parent = import_node
-                import_node.children.append(symbol_name)
-
-                # Add alias node if present
-                if name.asname:
-                    alias_node = MockNode(
-                        type='identifier',
-                        text=name.asname,
-                        start_point=(node.lineno - 1, node.col_offset + 5 + len(node.module) + 8 + len(name.name) + 4),  # After 'from module import name as '
-                        end_point=(node.lineno - 1, node.col_offset + 5 + len(node.module) + 8 + len(name.name) + 4 + len(name.asname))
-                    )
-                    alias_node.parent = import_node
-                    import_node.children.append(alias_node)
-
-                imports.append(import_node)
-            return imports
-
-        # Handle function definitions
-        if isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
-            mock_node = MockNode(
+                    children.append(child_node)
+            return MockNode(type='module', children=children)
+        elif isinstance(node, ast.FunctionDef):
+            name_node = MockNode(type='identifier', text=node.name)
+            return MockNode(
                 type='function_definition',
                 text=node.name,
+                fields={'name': name_node},
                 start_point=(node.lineno - 1, node.col_offset),
-                end_point=(node.end_lineno - 1, node.end_col_offset)
+                end_point=(node.end_lineno or node.lineno, node.end_col_offset or 0)
             )
-            # Add identifier node for function name
-            name_node = MockNode(
-                type='identifier',
-                text=node.name,
-                start_point=(node.lineno - 1, node.col_offset + 4),  # After 'def '
-                end_point=(node.lineno - 1, node.col_offset + 4 + len(node.name))
-            )
-            name_node.parent = mock_node
-            mock_node.children.append(name_node)
-
-            # Add parameters node
-            params_node = MockNode(
-                type='parameters',
-                text='',
-                start_point=(node.lineno - 1, node.col_offset),
-                end_point=(node.end_lineno - 1, node.end_col_offset)
-            )
-            for arg in node.args.args:
-                param_node = MockNode(
-                    type='identifier',
-                    text=arg.arg,
-                    start_point=(arg.lineno - 1, arg.col_offset),
-                    end_point=(arg.end_lineno - 1, arg.end_col_offset)
-                )
-                param_node.parent = params_node
-                params_node.children.append(param_node)
-            
-            # Add *args if present
-            if node.args.vararg:
-                param_node = MockNode(
-                    type='identifier',
-                    text=node.args.vararg.arg,
-                    start_point=(node.args.vararg.lineno - 1, node.args.vararg.col_offset),
-                    end_point=(node.args.vararg.end_lineno - 1, node.args.vararg.end_col_offset)
-                )
-                param_node.parent = params_node
-                params_node.children.append(param_node)
-            
-            # Add **kwargs if present
-            if node.args.kwarg:
-                param_node = MockNode(
-                    type='identifier',
-                    text=node.args.kwarg.arg,
-                    start_point=(node.args.kwarg.lineno - 1, node.args.kwarg.col_offset),
-                    end_point=(node.args.kwarg.end_lineno - 1, node.args.kwarg.end_col_offset)
-                )
-                param_node.parent = params_node
-                params_node.children.append(param_node)
-            
-            params_node.parent = mock_node
-            mock_node.children.append(params_node)
-            
-            # Add decorators
-            for decorator in node.decorator_list:
-                decorator_node = MockNode(
-                    type='decorator',
-                    text=ast.unparse(decorator),
-                    start_point=(decorator.lineno - 1, decorator.col_offset),
-                    end_point=(decorator.end_lineno - 1, decorator.end_col_offset)
-                )
-                decorator_node.parent = mock_node
-                mock_node.children.append(decorator_node)
-            
-            # Add async flag
-            if isinstance(node, ast.AsyncFunctionDef):
-                async_node = MockNode(
-                    type='async',
-                    text='async',
-                    start_point=(node.lineno - 1, node.col_offset),
-                    end_point=(node.end_lineno - 1, node.end_col_offset)
-                )
-                async_node.parent = mock_node
-                mock_node.children.append(async_node)
-            
-            # Add body node
-            body_node = MockNode(
-                type='block',
-                text='',
-                start_point=(node.lineno - 1, node.col_offset),
-                end_point=(node.end_lineno - 1, node.end_col_offset)
-            )
-            body_node.parent = mock_node
-            mock_node.children.append(body_node)
-
-            for stmt in node.body:
-                result = self._ast_to_mock_node(stmt)
-                if isinstance(result, list):
-                    for r in result:
-                        r.parent = body_node
-                        body_node.children.append(r)
-                else:
-                    result.parent = body_node
-                    body_node.children.append(result)
-            return mock_node
-
-        # Handle class definitions
-        if isinstance(node, ast.ClassDef):
-            mock_node = MockNode(
+        elif isinstance(node, ast.ClassDef):
+            name_node = MockNode(type='identifier', text=node.name)
+            return MockNode(
                 type='class_definition',
                 text=node.name,
+                fields={'name': name_node},
                 start_point=(node.lineno - 1, node.col_offset),
-                end_point=(node.end_lineno - 1, node.end_col_offset)
+                end_point=(node.end_lineno or node.lineno, node.end_col_offset or 0)
             )
-            # Add identifier node for class name
-            name_node = MockNode(
-                type='identifier',
-                text=node.name,
-                start_point=(node.lineno - 1, node.col_offset + 6),  # After 'class '
-                end_point=(node.lineno - 1, node.col_offset + 6 + len(node.name))
-            )
-            name_node.parent = mock_node
-            mock_node.children.append(name_node)
-
-            # Add argument_list node for bases
-            if node.bases:
-                bases_node = MockNode(
-                    type='argument_list',
-                    text='',
-                    start_point=(node.lineno - 1, node.col_offset),
-                    end_point=(node.end_lineno - 1, node.end_col_offset)
-                )
-                for base in node.bases:
-                    base_node = MockNode(
-                        type='identifier',
-                        text=ast.unparse(base),
-                        start_point=(base.lineno - 1, base.col_offset),
-                        end_point=(base.end_lineno - 1, base.end_col_offset)
-                    )
-                    base_node.parent = bases_node
-                    bases_node.children.append(base_node)
-                bases_node.parent = mock_node
-                mock_node.children.append(bases_node)
-            
-            # Add body node
-            body_node = MockNode(
-                type='block',
-                text='',
-                start_point=(node.lineno - 1, node.col_offset),
-                end_point=(node.end_lineno - 1, node.end_col_offset)
-            )
-            body_node.parent = mock_node
-            mock_node.children.append(body_node)
-
-            for stmt in node.body:
-                result = self._ast_to_mock_node(stmt)
-                if isinstance(result, list):
-                    for r in result:
-                        r.parent = body_node
-                        body_node.children.append(r)
+        elif isinstance(node, ast.Assign):
+            if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                left_node = MockNode(type='identifier', text=node.targets[0].id)
+                if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                    right_text = repr(node.value.value)
                 else:
-                    result.parent = body_node
-                    body_node.children.append(result)
-            return mock_node
-
-        # Handle function calls
-        if isinstance(node, ast.Call):
-            mock_node = MockNode(
-                type='call',
-                text=ast.unparse(node.func),
-                start_point=(node.lineno - 1, node.col_offset),
-                end_point=(node.end_lineno - 1, node.end_col_offset)
-            )
-            # Add identifier node for function name
-            name_node = MockNode(
-                type='identifier',
-                text=ast.unparse(node.func),
-                start_point=(node.lineno - 1, node.col_offset),
-                end_point=(node.lineno - 1, node.col_offset + len(ast.unparse(node.func)))
-            )
-            name_node.parent = mock_node
-            mock_node.children.append(name_node)
-
-            # Add argument_list node
-            args_node = MockNode(
-                type='argument_list',
-                text='',
-                start_point=(node.lineno - 1, node.col_offset),
-                end_point=(node.end_lineno - 1, node.end_col_offset)
-            )
-            for arg in node.args:
-                arg_node = MockNode(
-                    type='identifier',
-                    text=ast.unparse(arg),
-                    start_point=(arg.lineno - 1, arg.col_offset),
-                    end_point=(arg.end_lineno - 1, arg.end_col_offset)
+                    right_text = repr(node.value)
+                right_node = MockNode(type='string', text=right_text)
+                return MockNode(
+                    type='assignment',
+                    text=f"{node.targets[0].id} = {right_text}",
+                    fields={'left': left_node, 'right': right_node},
+                    start_point=(node.lineno - 1, node.col_offset),
+                    end_point=(node.end_lineno or node.lineno, node.end_col_offset or 0)
                 )
-                arg_node.parent = args_node
-                args_node.children.append(arg_node)
-            args_node.parent = mock_node
-            mock_node.children.append(args_node)
-            return mock_node
-
-        # Handle variable names
-        if isinstance(node, ast.Name):
+        elif isinstance(node, ast.Import):
             return MockNode(
-                type='identifier',
-                text=node.id,
+                type='import',
+                text=f"import {', '.join(name.name for name in node.names)}",
                 start_point=(node.lineno - 1, node.col_offset),
-                end_point=(node.end_lineno - 1, node.end_col_offset)
+                end_point=(node.end_lineno or node.lineno, node.end_col_offset or 0)
             )
-
-        # Handle other nodes
-        return MockNode(
-            type='unknown',
-            text=ast.unparse(node),
-            start_point=(node.lineno - 1, node.col_offset),
-            end_point=(node.end_lineno - 1, node.end_col_offset)
-        )
+        elif isinstance(node, ast.ImportFrom):
+            imports = []
+            for name in node.names:
+                imports.append(MockNode(
+                    type='import',
+                    text=f"from {node.module} import {name.name}",
+                    start_point=(node.lineno - 1, node.col_offset),
+                    end_point=(node.end_lineno or node.lineno, node.end_col_offset or 0)
+                ))
+            return imports
+        return MockNode(type='unknown')
 
     def _value_to_mock_node(self, node: ast.AST) -> MockNode:
         """Convert value node to mock node.
@@ -598,10 +386,11 @@ class CodeParser:
                 module_name = None
                 alias_name = None
                 for child in node.children:
-                    if child.type == 'dotted_name':
-                        module_name = child.text
-                    elif child.type == 'identifier':
-                        alias_name = child.text
+                    if child.type == 'identifier':
+                        if not module_name:
+                            module_name = child.text
+                        else:
+                            alias_name = child.text
                 if module_name:
                     symbols['imports'].append({
                         'module': module_name,
@@ -611,26 +400,22 @@ class CodeParser:
                         'end_line': node.end_point[0]
                     })
             elif node.type == 'import_from_statement':
-                # Get the module name from the dotted_name
+                # Get the module name and symbols from the children
                 module_name = None
-                symbol_name = None
-                alias_name = None
                 for child in node.children:
                     if child.type == 'dotted_name':
-                        if not module_name:
-                            module_name = child.text
-                        elif not symbol_name:
-                            symbol_name = child.text
-                    elif child.type == 'identifier':
-                        alias_name = child.text
-                if module_name and symbol_name:
-                    symbols['imports'].append({
-                        'module': module_name,
-                        'symbol': symbol_name,
-                        'alias': alias_name,
-                        'start_line': node.start_point[0],
-                        'end_line': node.end_point[0]
-                    })
+                        module_name = child.text
+                        break
+                if module_name:
+                    for child in node.children:
+                        if child.type == 'identifier':
+                            symbols['imports'].append({
+                                'module': module_name,
+                                'symbol': child.text,
+                                'alias': None,
+                                'start_line': node.start_point[0],
+                                'end_line': node.end_point[0]
+                            })
 
             # Process functions and methods
             elif node.type == 'function_definition':
@@ -671,20 +456,17 @@ class CodeParser:
 
             # Process classes
             elif node.type == 'class_definition':
-                # Get the class name from the identifier
-                class_name = None
-                for child in node.children:
-                    if child.type == 'identifier':
-                        class_name = child.text
-                        break
+                # Get the class name from the name field
+                name_node = node.fields.get('name')
+                class_name = name_node.text if name_node else None
                 if class_name:
-                    # Get base classes
+                    # Get base classes from the bases field
                     bases = []
-                    for child in node.children:
-                        if child.type == 'argument_list':
-                            for base_node in child.children:
-                                if base_node.type == 'identifier':
-                                    bases.append(base_node.text)
+                    bases_node = node.fields.get('bases')
+                    if bases_node:
+                        for base_node in bases_node.children:
+                            if base_node.type == 'identifier':
+                                bases.append(base_node.text)
 
                     # Create class info
                     class_info = {
@@ -697,32 +479,29 @@ class CodeParser:
                     symbols['classes'].append(class_info)
 
                     # Process all methods in the class
-                    for child in node.children:
-                        if child.type == 'block':
-                            for method_node in child.children:
-                                if method_node.type == 'function_definition':
-                                    method_name = None
-                                    for method_child in method_node.children:
-                                        if method_child.type == 'identifier':
-                                            method_name = method_child.text
-                                            break
-                                    if method_name:
-                                        parameters = []
-                                        for method_child in method_node.children:
-                                            if method_child.type == 'parameters':
-                                                for param_node in method_child.children:
-                                                    if param_node.type == 'identifier':
-                                                        parameters.append({
-                                                            'name': param_node.text,
-                                                            'start_line': param_node.start_point[0],
-                                                            'end_line': param_node.end_point[0]
-                                                        })
-                                        class_info['methods'].append({
-                                            'name': method_name,
-                                            'parameters': parameters,
-                                            'start_line': method_node.start_point[0],
-                                            'end_line': method_node.end_point[0]
-                                        })
+                    body_node = node.fields.get('body')
+                    if body_node:
+                        for method_node in body_node.children:
+                            if method_node.type == 'function_definition':
+                                method_name_node = method_node.fields.get('name')
+                                method_name = method_name_node.text if method_name_node else None
+                                if method_name:
+                                    parameters = []
+                                    params_node = method_node.fields.get('parameters')
+                                    if params_node:
+                                        for param_node in params_node.children:
+                                            if param_node.type == 'identifier':
+                                                parameters.append({
+                                                    'name': param_node.text,
+                                                    'start_line': param_node.start_point[0],
+                                                    'end_line': param_node.end_point[0]
+                                                })
+                                    class_info['methods'].append({
+                                        'name': method_name,
+                                        'parameters': parameters,
+                                        'start_line': method_node.start_point[0],
+                                        'end_line': method_node.end_point[0]
+                                    })
 
             # Process function calls
             elif node.type == 'call':
@@ -740,6 +519,20 @@ class CodeParser:
                     })
 
             # Process variable references
+            elif node.type == 'assignment':
+                left_node = node.fields.get('left')
+                right_node = node.fields.get('right')
+                if left_node:
+                    var_name = left_node.text
+                    value_type = right_node.type if right_node else 'unknown'
+                    if value_type == 'string':
+                        value_type = 'str'
+                    symbols['variables'].append({
+                        'name': var_name,
+                        'type': value_type,
+                        'start_line': node.start_point[0],
+                        'end_line': node.end_point[0]
+                    })
             elif node.type == 'identifier':
                 if node.text and node.text not in IGNORED_NAMES:
                     # Skip type hints

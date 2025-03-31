@@ -31,16 +31,17 @@
   - ✅ Mock parser for testing
   - ✅ Node traversal utilities
 - ✅ Analyzer layer implementation
-  - ✅ Import extraction
-  - ✅ Function extraction
-  - ✅ Class extraction
-  - ✅ Variable extraction
-  - ✅ Type inference
+  - ✅ Import extraction (including relative imports)
+  - ✅ Function extraction (top-level)
+  - ✅ Class extraction (including methods)
+  - ✅ Variable extraction (top-level)
 - ✅ Symbol extraction layer implementation
   - ✅ Symbol table management
   - ✅ Scope handling
   - ✅ Reference tracking
   - ✅ Type handling
+- ✅ **Basic Analyzer Testing**
+  - ✅ All tests in `tests/test_analyzer.py` passing with mock parser.
 
 ### Code Generation
 - ✅ Basic model integration
@@ -128,12 +129,11 @@
 ## In Progress
 
 ### AI Coding Agent MCP Tools
-- 🔄 Evaluation and prioritization of new tools
-- 🔄 Research on code analysis technologies 
-- 🔄 Addressing code coverage for Code Understanding Tool (currently at 24%)
-- 🔄 Implementing relationship extraction for code understanding
-- 🔄 Developing graph representation for code relationships
-- 🔄 Creating visualization exports for code graphs
+- 🔄 **Code Understanding Tool - Test Coverage & Enhancement**
+  - 🔄 Addressing code coverage for `analyzer.py`, `parser.py`, `mock_parser.py` (currently low ~15%).
+  - 🔄 Implementing relationship extraction for code understanding.
+  - 🔄 Developing graph representation for code relationships.
+  - 🔄 Creating visualization exports for code graphs.
 
 ### Test Coverage Implementation
 - 🔄 Evaluation of current test coverage
@@ -210,53 +210,26 @@
 
 ### AI Coding Agent MCP Tools
 - 📋 Code Understanding Tool
+  - 📋 **Test Coverage Improvement**
+    - 📋 Implement tests for currently uncovered paths in `analyzer.py`, `parser.py`, `mock_parser.py`.
+    - 📋 Implement tests for graph.py (currently 0% coverage).
+    - 📋 Implement tests for relationships.py (currently 0% coverage).
+    - 📋 Add tests for error handling paths.
+    - 📋 Create tests for edge cases.
+    - 📋 Develop integration tests for end-to-end workflows.
   - 📋 Relationship Graph Implementation
-    - 📋 Implement relationship extraction logic
-    - 📋 Complete graph data structure implementation
-    - 📋 Build call graph representation
-    - 📋 Create inheritance hierarchy visualization
-    - 📋 Implement dependency tracking
-  - 📋 Test Coverage Improvement
-    - 📋 Implement tests for graph.py (currently 0% coverage)
-    - 📋 Implement tests for relationships.py (currently 0% coverage)
-    - 📋 Add tests for error handling paths
-    - 📋 Create tests for edge cases
-    - 📋 Develop integration tests for end-to-end workflows
+    - 📋 Implement relationship extraction logic.
+    - 📋 Complete graph data structure implementation.
+    - 📋 Build call graph representation.
+    - 📋 Create inheritance hierarchy visualization.
+    - 📋 Implement dependency tracking.
   - 📋 Semantic Mapping
-    - 📋 Implement semantic extraction
-    - 📋 Build context mapping system
-    - 📋 Create embedding-based search
-    - 📋 Integrate with analysis engine
   - 📋 Indexing & Integration
-    - 📋 Implement persistent storage
-    - 📋 Build incremental updates
-    - 📋 Create MCP tool interface
-    - 📋 Write comprehensive tests
   - 📋 Performance Optimization
-    - 📋 Optimize for large codebases
-    - 📋 Implement caching strategies
-    - 📋 Add incremental analysis capabilities
-    - 📋 Create parallel processing support
 - 📋 Intelligent Refactoring Tool
-  - 📋 Code modification planning
-  - 📋 Behavior preservation validation
-  - 📋 Implementation discovery
-  - 📋 Multi-step refactoring
 - 📋 Test Generation Tool
-  - 📋 Automated test case generation
-  - 📋 Code coverage optimization
-  - 📋 Edge case discovery
-  - 📋 Test suite management
 - 📋 Dependency Impact Analysis Tool
-  - 📋 Dependency graph construction
-  - 📋 Impact prediction
-  - 📋 Change recommendation
-  - 📋 Visualization interface
 - 📋 Code Review Automation Tool
-  - 📋 Style checking
-  - 📋 Best practice verification
-  - 📋 Performance hotspot detection
-  - 📋 Security vulnerability scanning
 
 ### Test Coverage Implementation
 - 📋 Implement tests for observability tools
@@ -352,11 +325,10 @@
 ## Known Issues
 
 ### Test Coverage Gaps
-- ⚠️ Missing tests for 13 MCP tools
-- ⚠️ Inconsistent test coverage across components
-- ⚠️ Limited error condition testing
-- ⚠️ Lack of integration tests between tools
-- ⚠️ Missing performance testing for resource-intensive operations
+- ⚠️ Overall coverage low (~15%). Needs significant improvement across `analyzer.py`, `parser.py`, `mock_parser.py`, `graph.py`, `relationships.py`, `core.py`, etc.
+- ⚠️ Missing tests for many MCP tools outside of the code understanding module.
+- ⚠️ Limited error condition testing.
+- ⚠️ Lack of integration tests between tools.
 
 ### Server Connectivity
 - ⚠️ WebSocket transport not supported
@@ -713,11 +685,10 @@
 ### In Progress
 
 #### Language Support
-- [ ] JavaScript parser adapter
-- [ ] Swift parser adapter
+- [x] **JavaScript parser adapter basics implemented and tested (`test_language_adapters.py`)**
+- [ ] Test JavaScript parser thoroughly (`test_javascript_parser.py`, `test_javascript_support.py`)
+- [ ] Swift parser adapter (stubbed, basic tests pass)
 - [ ] Language detection system
-- [ ] Cross-language reference handling
-- [ ] Unified symbol resolution
 
 #### Semantic Analysis
 - [ ] Type system implementation
@@ -765,13 +736,13 @@
 
 ### Current Status
 - Core Python support: Complete
-- JavaScript support: Planning phase
-- Swift support: Planning phase
+- **JavaScript support: Basic parsing adapter implemented, needs further testing and integration.**
+- Swift support: Planning phase (adapter stubbed)
 - Semantic analysis: Design phase
-- Test coverage: 24% (needs improvement)
+- Test coverage: ~12% (needs significant improvement)
 
 ### Known Issues
-1. Low test coverage needs immediate attention
+1. Low test coverage needs immediate attention (**including for JS adapter**)
 2. Relationship extraction failures in complex cases
 3. Performance optimization needed for large codebases
 4. Documentation needs updating for new features

@@ -1,50 +1,12 @@
 # Terminal Command Runner MCP - Active Context
 
 ## Current Focus
-- AI Coding Agent MCP tools implementation
-- Code Understanding Tool development
-  - Core components (Parser, Analyzer, SymbolExtractor) implemented
-  - Tree-sitter integration complete with fallback to mock parser
-  - Unit and integration tests in progress
-  - Working on relationship graph building and semantic mapping implementation
-  - **Current Test Issues**:
-    - Import node creation needs refinement:
-      - Test expects 4 import nodes but getting 6 (os, sys.path, typing.List, typing.Optional)
-      - Currently creating both module and symbol nodes for each import
-      - Need to modify `_process_imports` to only create appropriate nodes
-    - Directory test edge creation needs fixing:
-      - Test expects 1 import edge but getting 2 for `from module1 import func1`
-      - Currently creating edges to both module and symbol import nodes
-      - Need to modify `_process_imports` to create only one edge per import
-    - Coverage improvements needed:
-      - Current coverage at 23% (target: 90%)
-      - Key files needing coverage:
-        - server/code_understanding/analyzer.py (27%)
-        - server/code_understanding/extractor.py (15%)
-        - server/code_understanding/symbols.py (0%)
-        - server/core.py (0%)
-        - server/llm.py (0%)
-  - **Next Implementation Steps**:
-    1. Fix import node creation in `_process_imports`:
-       - Update logic to create only necessary nodes
-       - Ensure proper handling of different import types
-       - Add comprehensive tests for each import scenario
-    2. Fix edge creation in `_process_imports`:
-       - Modify edge creation logic for symbol imports
-       - Ensure consistent edge creation across import types
-       - Add tests for edge creation scenarios
-    3. Improve test coverage:
-       - Add tests for untested components
-       - Focus on critical paths in analyzer and extractor
-       - Add integration tests for full workflow
-    4. Complete relationship graph implementation:
-       - Finish graph data structure
-       - Implement remaining relationship types
-       - Add graph traversal utilities
-    5. Develop semantic mapping:
-       - Design embedding-based search
-       - Create context mapping
-       - Implement similarity functions
+- Finishing Code Understanding Tool implementation
+  - **JavaScript Support:** Basic parser adapter implemented and passing initial tests (`test_language_adapters.py`). Need to run more comprehensive tests (`test_javascript_parser.py`, `test_javascript_support.py`) and ensure integration with analyzer.
+  - Python Analyzer: Core functionality works correctly with the mock parser.
+  - **Next Steps:**
+    1. **Run comprehensive JavaScript parser tests.**
+    2. Address Test Coverage: Increase overall coverage, focusing on JS adapter and Python analyzer/parser components.
 - Intelligent Refactoring Tool implementation
 - Test Generation Tool development 
 - Dependency Impact Analysis Tool creation
@@ -70,6 +32,14 @@
 - Improving test coverage and documentation
 
 ## Recent Changes
+- **Fixed Language Adapter Tests:** Resolved failures in `test_language_adapters.py` by correcting JS root node type conversion and adding `ValueError` for empty input to both JS and Swift parsers.
+- **Fixed Mock Parser Fallback:** Corrected `CodeParser.parse` to properly use the `MockParser` instance from `mock_parser.py` during fallback.
+- **Fixed Import Parsing:** 
+  - Updated `MockParser` to correctly handle relative import levels (`.` and `..`).
+  - Updated `CodeAnalyzer` to look for `import_statement` and `import_from_statement` node types.
+- **Fixed Class Method Extraction:** Updated `CodeAnalyzer._extract_class` to correctly find the `body` node and extract `function_definition` children (methods) within it.
+- **Corrected Test Assertions:** Adjusted assertions in `test_analyze_code` and `test_analyze_file` to reflect the design where class methods are stored within the class structure, not in the top-level functions list.
+- **Added Debugging:** Enhanced logging and added print statements to trace execution flow during parser fallback.
 - Evaluated and prioritized new MCP tools for AI Coding Agents
 - Created detailed implementation plan for Code Understanding Tool
 - Developed architecture for new AI agent tools
@@ -114,14 +84,15 @@
 ## Implementation Plan
 1. AI Coding Agent MCP Tools (NEW HIGHEST PRIORITY)
    - [ ] Code Understanding Tool
-     - [x] Core code analysis engine implementation
-     - [x] Basic tree-sitter integration
-     - [x] Symbol extraction system
+     - [x] Core code analysis engine implementation (Parser, Analyzer, SymbolExtractor)
+     - [x] Basic tree-sitter integration with mock fallback
+     - [x] Symbol extraction system basics
+     - [x] **Analyzer tests passing with mock parser**
      - [ ] Relationship graph builder development
      - [ ] Semantic mapper implementation
      - [ ] Code indexer development
      - [ ] MCP tool interface integration
-     - [ ] Comprehensive testing
+     - [ ] Comprehensive testing (increase coverage)
    - [ ] Intelligent Refactoring Tool
    - [ ] Test Generation Tool
    - [ ] Dependency Impact Analysis Tool
@@ -219,173 +190,40 @@
     - [ ] Documentation
 
 ## Next Steps
-1. Complete relationship graph implementation:
-   - Design graph data structure
-   - Implement relationship extraction
-   - Add graph traversal utilities
-2. Develop semantic mapping:
-   - Design embedding-based search
-   - Create context mapping
-   - Implement similarity functions
-3. Create persistent indexing system:
-   - Design index structure
-   - Implement incremental analysis
-   - Add index management tools
-4. Build MCP tool interface:
+1. **Run tests in `tests/test_javascript_parser.py`.**
+2. **Address Test Coverage:** Focus on increasing coverage for `language_adapters.py` (JS part), `analyzer.py`, `mock_parser.py`, and `parser.py` based on the `coverage html` report.
+3. Implement relationship graph building based on extracted symbols/references (for Python first).
+4. Develop semantic mapping capabilities.
+5. Create persistent indexing system.
+6. Build MCP tool interface:
    - Design API interface
    - Implement command handlers
    - Create response formatters
-5. Expand language support:
+7. Expand language support:
    - Add more tree-sitter parsers
    - Enhance language-specific analysis
-6. Improve test coverage:
+8. Improve test coverage:
    - Add more unit tests
    - Implement integration tests
    - Test edge cases
-7. Optimize performance:
+9. Optimize performance:
    - Profile code execution
    - Optimize memory usage
    - Add caching where beneficial
 
 ## Active Decisions
-1. AI Coding Agent MCP Tools
-   - Prioritized Code Understanding Tool as most impactful for AI agents
-   - Selected tree-sitter for language-agnostic parsing with mock parser fallback for testing
-   - Implementing graph-based code relationship mapping
-   - Using embedding-based semantic search for code context
-   - Will support incremental analysis for performance
-   - Targeting 5-week implementation timeline
-   - Modular architecture with clear separation of concerns
-   - Initial focus on Python support with plans to expand
-   - Prioritizing test coverage and error handling
-
-2. Server Connectivity
-   - Using SSE transport instead of WebSocket (WebSocket not supported)
-   - Running server on port 9001 to avoid conflicts
-   - Using Traefik for proxying connections
-   - Maintaining SSH access for server management
-   - Implementing proper error handling for connection issues
-
-3. Code Generation
-   - Using multiple model providers
-   - Supporting local models
-   - Integrating with validation
-   - Using profiling for optimization
-   - Implementing security controls
-
-4. Profiling
-   - Using cProfile for basic profiling
-   - Collecting detailed metrics
-   - Providing analysis tools
-   - Implementing security controls
-   - Optimizing performance
-
-5. Validation
-   - Using multiple checkers
-   - Supporting custom checks
-   - Providing analysis tools
-   - Implementing security controls
-   - Optimizing performance
-
-6. Model Management
-   - Supporting multiple providers
-   - Managing resources
-   - Tracking performance
-   - Implementing security
-   - Optimizing usage
-
-7. Performance
-   - Using profiling data
-   - Collecting metrics
-   - Analyzing bottlenecks
-   - Optimizing resources
-   - Scaling system
-
-8. Security
-   - Implementing access control
-   - Validating inputs
-   - Protecting resources
-   - Auditing actions
-   - Ensuring compliance
-
-9. Documentation
-   - Using Markdown format
-   - Providing examples
-   - Writing tutorials
-   - Including tests
-   - Maintaining accuracy
-
-10. Testing
-    - Using pytest
-    - Testing all features
-    - Testing performance
-    - Testing security
-    - Maintaining coverage
+- Confirmed `CodeAnalyzer` separates top-level functions from class methods.
+- Confirmed `MockParser` from `mock_parser.py` is now correctly used during fallback.
 
 ## Known Issues
-1. Server Connectivity
+- ⚠️ **Low Code Coverage:** Overall coverage is ~12%, significantly below the 90% target. Many components have low or zero coverage, **including the new JS adapter code.**
+- Server Connectivity
    - Transport protocol limitations (WebSocket not supported)
    - Potential firewall restrictions on cloud provider
    - Proxy configuration complexity
    - Connection timeouts from certain networks
    - Error handling limitations
    - Lack of comprehensive documentation
-
-2. Code Generation
-   - Model API rate limits
-   - Local model resource usage
-   - Generation latency
-   - Output validation
-   - Security concerns
-
-3. Profiling
-   - Overhead impact
-   - Data storage
-   - Analysis complexity
-   - Resource usage
-   - Security concerns
-
-4. Validation
-   - Check performance
-   - False positives
-   - Resource usage
-   - Analysis complexity
-   - Security concerns
-
-5. Model Management
-   - Resource allocation
-   - Performance tracking
-   - Error handling
-   - Security controls
-   - Scaling issues
-
-6. Performance
-   - Resource bottlenecks
-   - Scaling limitations
-   - Latency issues
-   - Memory usage
-   - CPU usage
-
-7. Security
-   - Access control gaps
-   - Input validation
-   - Resource protection
-   - Audit logging
-   - Compliance issues
-
-8. Documentation
-   - Coverage gaps
-   - Outdated content
-   - Missing examples
-   - Incomplete tutorials
-   - Test coverage
-
-9. Testing
-   - Coverage gaps
-   - Performance tests
-   - Security tests
-   - Integration tests
-   - System tests
 
 ## Dependencies
 1. External Services

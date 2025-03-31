@@ -15,40 +15,51 @@ class SymbolExtractor:
         self.symbols = {}
         self.references = {}
         
-    def extract_symbols(self, tree: Tree) -> Dict[str, Any]:
-        """Extract symbols from a syntax tree.
-        
+    def extract_symbols(self, tree: Any) -> Dict[str, List[Dict[str, Any]]]:
+        """Extract symbols from the tree.
+
         Args:
-            tree: Parsed syntax tree
-            
+            tree: Syntax tree
+
         Returns:
-            Dict containing extracted symbols
+            Dictionary of symbols
         """
-        try:
-            if tree is None:
-                return {'symbols': {}, 'references': {}}
-                
-            root_node = tree.root_node
-            if not root_node:
-                logger.error("Invalid syntax tree: no root node")
-                return {'symbols': {}, 'references': {}}
-            
-            # Reset state
-            self.current_scope = None
-            self.symbols = {}
-            self.references = {}
-            
-            # Process the tree
-            self._process_node(root_node)
-            
-            # Return the symbols and references
-            return {
-                'symbols': self.symbols,
-                'references': self.references
-            }
-        except Exception as e:
-            logger.error(f"Failed to extract symbols: {e}")
-            return {'symbols': {}, 'references': {}}
+        symbols = {
+            'functions': [],
+            'classes': [],
+            'variables': []
+        }
+
+        if tree.root_node.type == 'program':
+            for node in tree.root_node.children:
+                if node.type == 'function_declaration':
+                    name_node = node.fields.get('name')
+                    if name_node:
+                        symbols['functions'].append({
+                            'name': name_node.text,
+                            'start_line': node.start_point[0],
+                            'end_line': node.end_point[0]
+                        })
+                elif node.type == 'class_declaration':
+                    name_node = node.fields.get('name')
+                    if name_node:
+                        symbols['classes'].append({
+                            'name': name_node.text,
+                            'start_line': node.start_point[0],
+                            'end_line': node.end_point[0]
+                        })
+                elif node.type == 'variable_declaration':
+                    declarator = node.fields.get('declarator')
+                    if declarator:
+                        name_node = declarator.fields.get('name')
+                        if name_node:
+                            symbols['variables'].append({
+                                'name': name_node.text,
+                                'start_line': node.start_point[0],
+                                'end_line': node.end_point[0]
+                            })
+
+        return symbols
     
     def _process_node(self, node: Node) -> None:
         """Process a node in the syntax tree.

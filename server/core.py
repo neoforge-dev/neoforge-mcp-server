@@ -2293,6 +2293,53 @@ def _analyze_style(code: str) -> Dict[str, Any]:
             "message": "Failed to analyze style"
         }
 
+def force_terminate(pid: int) -> Dict[str, Any]:
+    """Force terminate a process.
+    
+    Args:
+        pid: Process ID to terminate
+        
+    Returns:
+        Dictionary containing success status
+    """
+    try:
+        os.kill(pid, signal.SIGTERM)
+        return {"success": True}
+    except ProcessLookupError:
+        return {"success": True}  # Process already terminated
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def block_command(command: str) -> Dict[str, Any]:
+    """Add a command to the blacklist.
+    
+    Args:
+        command: Command to block
+        
+    Returns:
+        Dictionary containing success status
+    """
+    try:
+        blacklisted_commands.add(command)
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def unblock_command(command: str) -> Dict[str, Any]:
+    """Remove a command from the blacklist.
+    
+    Args:
+        command: Command to unblock
+        
+    Returns:
+        Dictionary containing success status
+    """
+    try:
+        blacklisted_commands.remove(command)
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def main():
     # Set up the server
     import uvicorn
