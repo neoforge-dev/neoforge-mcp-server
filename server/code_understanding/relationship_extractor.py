@@ -2,7 +2,7 @@
 
 from typing import Dict, List, Set, Any, Optional
 from pathlib import Path
-from .javascript_parser import JavaScriptParser
+from .language_adapters import JavaScriptParserAdapter
 from .module_resolver import ModuleResolver
 
 class JavaScriptRelationshipExtractor:
@@ -15,7 +15,7 @@ class JavaScriptRelationshipExtractor:
             root_dir: Root directory of the project
         """
         self.root_dir = Path(root_dir)
-        self.parser = JavaScriptParser()
+        self.parser = JavaScriptParserAdapter()
         self.module_resolver = ModuleResolver(root_dir)
         self.import_mapping: Dict[str, Dict[str, str]] = {}
         self.export_mapping: Dict[str, Dict[str, str]] = {}

@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union, Any, Iterator
 from pathlib import Path
-from .language_adapters import JavaScriptParserAdapter, SwiftParserAdapter
+
 from .common_types import MockNode, MockTree
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,9 @@ class CodeParser:
     def _try_load_adapters(self):
         """Try to load adapters for other languages."""
         try:
+            # Import adapters here to avoid circular imports
+            from .language_adapters import JavaScriptParserAdapter, SwiftParserAdapter
+            
             js_adapter = JavaScriptParserAdapter()
             if js_adapter.language: # Check if language loaded successfully
                  self.adapters['javascript'] = js_adapter
@@ -196,22 +199,21 @@ class CodeParser:
         )
         
         # Process children recursively
-        for field_name, child_node in node.children_by_field_name().items():
-             # How Tree-sitter handles fields vs children needs clarification
-             # Assuming children_by_field_name gives named children
-             mock_child = self._convert_ts_node_recursive(child_node)
-             if mock_child:
-                  mock_node.fields[field_name] = mock_child
-                  # Should they also be in children list? Depends on MockNode usage.
-                  # mock_node.children.append(mock_child) 
-                  
-        for child_node in node.children: # Iterate unnamed children? Check tree-sitter API
-             mock_child = self._convert_ts_node_recursive(child_node)
-             if mock_child:
-                 # Avoid duplicating named children if they are also in .children
-                 if field_name not in mock_node.fields or mock_node.fields[field_name] != mock_child:
-                      mock_node.children.append(mock_child)
-                        
+        for child in node.children:
+            child_mock = self._convert_ts_node_recursive(child)
+            if child_mock:
+                mock_node.children.append(child_mock)
+                child_mock.parent = mock_node
+
+        # Convert named fields
+        for field_name, field_value in node.children_by_field_name().items():
+            if isinstance(field_value, list):
+                mock_node.fields[field_name] = [
+                    self._convert_ts_node_recursive(v) for v in field_value
+                ]
+            else:
+                mock_node.fields[field_name] = self._convert_ts_node_recursive(field_value)
+
         return mock_node
 
     def _mock_parse(self, code: str) -> MockTree:

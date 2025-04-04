@@ -8,3 +8,34 @@ wheels/
 
 # Virtual environments
 .venv
+.env
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Test and coverage
+.pytest_cache/
+htmlcov/
+.coverage
+.repomix-output.txt
+
+# Build and generated files
+vendor/
+output/
+*.log
+*.tmp
+uv.lock
+
+# Documentation and research
+memory-bank/
+local-research/
+local-docs/
+
+# Debug and temporary files
+debug_js_ast.py
+test_manually.py
+test_system_manually.py

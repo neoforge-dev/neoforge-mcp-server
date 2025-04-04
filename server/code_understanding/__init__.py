@@ -1,20 +1,17 @@
-"""Code understanding module for analyzing source code."""
+"""Code understanding module."""
 
-import os
-import logging
+from .common_types import MockNode, MockTree
 from .parser import CodeParser
+from .language_adapters import JavaScriptParserAdapter, SwiftParserAdapter
 from .analyzer import CodeAnalyzer
 from .extractor import SymbolExtractor
-from .build_languages import build_languages
 
-logger = logging.getLogger(__name__)
-
-# Build language library on import
-try:
-    LANGUAGE_LIB_PATH = build_languages()
-    logger.info(f"Language library built at {LANGUAGE_LIB_PATH}")
-except Exception as e:
-    logger.error(f"Failed to build language library: {e}")
-    LANGUAGE_LIB_PATH = None
-
-__all__ = ['CodeParser', 'CodeAnalyzer', 'SymbolExtractor'] 
+__all__ = [
+    "MockNode",
+    "MockTree",
+    "CodeParser",
+    "JavaScriptParserAdapter",
+    "SwiftParserAdapter",
+    "CodeAnalyzer",
+    "SymbolExtractor"
+]

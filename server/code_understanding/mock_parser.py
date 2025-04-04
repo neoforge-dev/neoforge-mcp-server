@@ -381,55 +381,30 @@ class MockParser:
         """Convert AST node to mock node."""
         if isinstance(node, ast.Import):
             names = [name.name for name in node.names]
-            return MockNode(
-                type='import_statement', 
-                text=f"import {', '.join(names)}", 
-                start_point=(node.lineno - 1, 0), 
-                end_point=(node.lineno - 1, len(f"import {', '.join(names)}")), 
-                children=[MockNode('identifier', text=name) for name in names]
-            )
+            return MockNode('import', text=f"import {', '.join(names)}", start_point=(node.lineno, 0), end_point=(node.lineno, len(f"import {', '.join(names)}")))
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ''
-            level = node.level # Get the relative import level
-            
-            # Prepend dots for relative imports
-            relative_prefix = '.' * level
-            full_module_name = f"{relative_prefix}{module}"
-            
             names = [name.name for name in node.names]
             
-            # Create the module node with the full name including dots
-            module_node = MockNode('dotted_name', text=full_module_name)
+            # Add dots for relative imports
+            module_prefix = '.' * node.level
+            full_module = f"{module_prefix}{module}" if module else module_prefix
             
-            return MockNode(
-                type='import_from_statement', 
-                text=f"from {full_module_name} import {', '.join(names)}", # Use full name in text too
-                start_point=(node.lineno - 1, 0), 
-                end_point=(node.lineno - 1, len(f"from {full_module_name} import {', '.join(names)}")), 
-                children=[
-                    module_node,
-                    *[MockNode('identifier', text=name) for name in names]
-                ]
-            )
+            # For each imported name, create a separate import node
+            import_nodes = []
+            for name in names:
+                import_nodes.append(MockNode('import', text=f"from {full_module} import {name}", start_point=(node.lineno, 0), end_point=(node.lineno, len(f"from {full_module} import {name}"))))
+            # Return a module node containing all import nodes
+            return MockNode('module', children=import_nodes)
         elif isinstance(node, ast.FunctionDef):
             params = []
             for arg in node.args.args:
                 params.append(MockNode('identifier', text=arg.arg, start_point=(node.lineno, 0), end_point=(node.lineno, len(arg.arg))))
             
-            body_nodes = []
-            for child in node.body:
-                if isinstance(child, ast.Return):
-                    if isinstance(child.value, ast.Call):
-                        body_nodes.append(self._convert_ast_node(child.value))
-                    else:
-                        body_nodes.append(self._convert_ast_node(child))
-                else:
-                    body_nodes.append(self._convert_ast_node(child))
-            
             return MockNode('function_definition', text=node.name, start_point=(node.lineno, 0), end_point=(node.end_lineno, 0), children=[
                 MockNode('name', text=node.name),
                 MockNode('parameters', children=params),
-                MockNode('body', children=body_nodes)
+                MockNode('body', children=[self._convert_ast_node(child) for child in node.body])
             ])
         elif isinstance(node, ast.ClassDef):
             name_node = MockNode(type='identifier', text=node.name)

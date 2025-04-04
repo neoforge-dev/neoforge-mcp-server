@@ -1,0 +1,84 @@
+{
+  "timestamp": "2025-04-04T17:25:56.253277",
+  "tests": {
+    "health_check": {
+      "status": "passed",
+      "result": {
+        "mean": 0.0009137153625488281,
+        "stdev": 0.0009451340250692465,
+        "min": 0.0005161762237548828,
+        "max": 0.0035970211029052734,
+        "iterations": 10
+      }
+    },
+    "tool_registration": {
+      "status": "passed",
+      "result": {
+        "mean": 0.0005774736404418945,
+        "stdev": 2.9379268542053782e-05,
+        "min": 0.0005540847778320312,
+        "max": 0.0006439685821533203,
+        "iterations": 10
+      }
+    },
+    "tool_execution": {
+      "status": "passed",
+      "result": {
+        "mean": 0.0005604028701782227,
+        "stdev": 4.7353988647224246e-05,
+        "min": 0.0004858970642089844,
+        "max": 0.0006546974182128906,
+        "iterations": 10
+      }
+    },
+    "file_operation": {
+      "status": "passed",
+      "result": {
+        "mean": 0.0005896091461181641,
+        "stdev": 0.00011230997008935396,
+        "min": 0.0005040168762207031,
+        "max": 0.0008170604705810547,
+        "iterations": 10
+      }
+    },
+    "system_info": {
+      "status": "passed",
+      "result": {
+        "mean": 0.000597381591796875,
+        "stdev": 7.901946116015928e-05,
+        "min": 0.0005078315734863281,
+        "max": 0.0007388591766357422,
+        "iterations": 10
+      }
+    },
+    "concurrent_operations": {
+      "status": "passed",
+      "result": {
+        "total_time": 0.0015060901641845703
+      }
+    },
+    "stress_test": {
+      "status": "passed",
+      "result": {
+        "total_time": 0.001605987548828125
+      }
+    },
+    "large_file_operation": {
+      "status": "passed",
+      "result": {
+        "mean": 0.0006182670593261718,
+        "stdev": 9.940402261818628e-05,
+        "min": 0.0005290508270263672,
+        "max": 0.0007631778717041016,
+        "iterations": 5
+      }
+    },
+    "multiple_tools": {
+      "status": "passed",
+      "result": {
+        "total_time": 0.0025250911712646484
+      }
+    }
+  },
+  "overall_score": 100.0
+}

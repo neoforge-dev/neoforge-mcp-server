@@ -48,16 +48,17 @@ class SymbolExtractor:
                             'start_line': node.start_point[0],
                             'end_line': node.end_point[0]
                         })
-                elif node.type == 'variable_declaration':
-                    declarator = node.fields.get('declarator')
-                    if declarator:
-                        name_node = declarator.fields.get('name')
-                        if name_node:
-                            symbols['variables'].append({
-                                'name': name_node.text,
-                                'start_line': node.start_point[0],
-                                'end_line': node.end_point[0]
-                            })
+                elif node.type in ('variable_declaration', 'lexical_declaration'):
+                    # Handle both var and let/const declarations
+                    for child in node.children:
+                        if child.type == 'variable_declarator':
+                            name_node = child.fields.get('name')
+                            if name_node:
+                                symbols['variables'].append({
+                                    'name': name_node.text,
+                                    'start_line': node.start_point[0],
+                                    'end_line': node.end_point[0]
+                                })
 
         return symbols
     

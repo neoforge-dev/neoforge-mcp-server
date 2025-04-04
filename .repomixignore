@@ -1,0 +1,51 @@
+# Build and cache directories
+__pycache__/
+.pytest_cache/
+htmlcov/
+build/
+dist/
+*.egg-info/
+vendor/
+
+# Virtual environments
+.venv/
+.env/
+
+# Generated files
+.coverage
+.repomix-output.txt
+.DS_Store
+uv.lock
+
+# Test output and temporary files
+output/
+*.log
+*.tmp
+
+# Large binary or generated files
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dylib
+*.dll
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker related
+docker/
+docker-compose.yml
+
+# Documentation and research
+memory-bank/
+local-research/
+local-docs/
+
+# Debug and temporary files
+debug_js_ast.py
+test_manually.py
+test_system_manually.py 

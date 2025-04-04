@@ -1,0 +1,90 @@
+# Neo Operations MCP Server Configuration
+
+# Server identification
+name: "neoo_mcp"
+version: "1.0.0"
+port: 7446
+
+# Logging
+log_level: "INFO"
+log_file: "neoo_mcp.log"
+log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+log_rotation: "1 day"
+log_retention: 7
+
+# Security
+enable_auth: true
+auth_token: null
+allowed_origins: ["*"]
+
+# Resource limits
+max_processes: 4
+max_memory_percent: 90.0
+max_cpu_percent: 90.0
+max_disk_percent: 90.0
+max_runtime: 3600
+check_resources: true
+resource_limits:
+  cpu_percent: 95.0
+  memory_percent: 95.0
+  disk_percent: 95.0
+
+# Operations settings
+enable_process_management: true
+enable_resource_monitoring: true
+enable_system_commands: true
+enable_file_operations: true
+enable_network_operations: true
+enable_backup_operations: true
+
+# Monitoring
+enable_metrics: true
+metrics_port: 9090
+enable_tracing: true
+tracing_endpoint: "http://localhost:4317"
+enable_health_checks: true
+health_check_interval: 30
+
+# Development
+debug: false
+reload: false
+reload_dirs: []
+
+# Connection settings
+connection_timeout: 30
+keep_alive_timeout: 60
+max_requests_per_connection: 1000
+
+# File operations
+max_file_size: 104857600 # 100MB
+allowed_extensions: []
+
+# SSL/TLS settings
+enable_ssl: false
+ssl_cert: null
+ssl_key: null
+
+# Proxy settings
+enable_proxy: false
+proxy_protocol: false
+trusted_proxies: []
+
+# Compression settings
+enable_compression: true
+compression_level: 6
+
+# Timeout settings
+request_timeout: 30
+response_timeout: 30
+connect_timeout: 5
+
+# Worker settings
+worker_class: "uvicorn.workers.UvicornWorker"
+worker_connections: 1000
+worker_timeout: 30
+
+# API documentation
+enable_docs: true
+docs_url: "/docs"
+redoc_url: "/redoc"
+openapi_url: "/openapi.json"

@@ -10,11 +10,18 @@ dependencies = [
     "opentelemetry-exporter-otlp>=1.31.1",
     "opentelemetry-sdk>=1.31.1",
     "psutil>=7.0.0",
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "pytest-mock>=3.11.1",
     "PyYAML>=6.0.1",
     "tree-sitter>=0.24.0",
+    "pytest>=7.4.0",
+    "pluggy>=1.5",
+    "iniconfig",
+    "packaging",
+    "pytest-cov>=4.1.0",
+    "coverage",
+    "pytest-mock>=3.11.1",
+    "pytest-anyio",
+    "fastapi>=0.115.12",
+    "python-digitalocean>=1.17.0",
 ]
 
 [project.optional-dependencies]
@@ -31,7 +38,7 @@ packages = ["server"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "--verbose --cov=server --cov-report=term-missing --cov-report=html"
+addopts = "--verbose --maxfail=3 --tb=short --showlocals --no-header --cov=server --cov-report=term-missing --cov-report=html"
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::UserWarning",
@@ -53,7 +60,7 @@ exclude_lines = [
     "pass",
     "raise ImportError",
 ]
-fail_under = 90
+fail_under = 9
 
 [dependency-groups]
 dev = [

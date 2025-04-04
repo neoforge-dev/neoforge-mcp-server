@@ -432,174 +432,180 @@ async def add_profiling_to_tools():
             profiled_func._profiled = True
             mcp.add_tool(tool_name)(profiled_func)
 
-def is_command_safe(cmd: str) -> bool:
-    """Check if a command is safe to execute"""
-    if not cmd.strip():
+def is_command_safe(command: str) -> bool:
+    """Validate if a command is safe to execute.
+    
+    Args:
+        command: The command string to validate
+        
+    Returns:
+        bool: True if the command is safe to execute, False otherwise
+    """
+    if not command or not command.strip():
         return False
-    for blocked in blacklisted_commands:
-        if blocked in cmd:
+        
+    # Check against blacklisted commands
+    if command in blacklisted_commands:
+        return False
+        
+    # Check for dangerous patterns
+    dangerous_patterns = [
+        r"rm\s+-rf\s+/",  # Remove root
+        r"mkfs",          # Format filesystem
+        r"dd\s+if=",      # Direct disk access
+        r">\s*/dev/",     # Write to device files
+        r";\s*rm\s+",     # Chained remove commands
+        r"&\s*rm\s+",     # Background remove commands
+        r"\|\s*rm\s+",    # Piped remove commands
+    ]
+    
+    for pattern in dangerous_patterns:
+        if re.search(pattern, command, re.IGNORECASE):
             return False
+            
     return True
 
 # Terminal Tools
 
-def execute_command(command: str, timeout: int = 10, allow_background: bool = True) -> dict:
-    """Execute a command with timeout and output capture."""
-    if not command or not isinstance(command, str):
-        return {
-            "status": "error",
-            "error": "Invalid command",
-            "pid": None,
-            "exit_code": 1,
-            "stdout": "",
-            "stderr": "Invalid command provided"
-        }
-
+def execute_command(command: str, timeout: float = 30, allow_background: bool = False) -> Dict[str, Any]:
+    """Execute a shell command with safety checks and timeout.
+    
+    Args:
+        command: The command to execute
+        timeout: Maximum execution time in seconds
+        allow_background: Whether to allow the command to run in background
+        
+    Returns:
+        Dict containing execution results with keys:
+        - exit_code: The command exit code (None if background)
+        - stdout: Standard output
+        - stderr: Standard error
+        - pid: Process ID (None if not background)
+        - runtime: Execution time in seconds
+        - complete: Whether execution is complete
+        - error: Error message if any
+    """
+    start_time = time.time()
+    
+    # Validate command
     if not is_command_safe(command):
         return {
-            "status": "error",
-            "error": "Command blocked",
-            "pid": None,
-            "exit_code": 1,
+            "exit_code": None,
             "stdout": "",
-            "stderr": "Command was blocked for security reasons"
+            "stderr": "Command was blocked for security reasons",
+            "pid": None,
+            "runtime": 0,
+            "complete": True,
+            "error": "Command blocked"
         }
-
+    
     try:
-        # Split command into args while preserving quoted strings
-        args = shlex.split(command)
+        # Setup process with proper signal handling
+        if sys.platform != "win32":
+            # On Unix-like systems, create a new process group
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                shell=True,
+                text=True,
+                bufsize=1,
+                universal_newlines=True,
+                preexec_fn=os.setsid  # Create new process group
+            )
+        else:
+            # On Windows, use normal process creation
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                shell=True,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
         
-        # Create output queues
-        stdout_queue = queue.Queue()
-        stderr_queue = queue.Queue()
-        
-        # Start process
-        process = subprocess.Popen(
-            args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            universal_newlines=True
-        )
-        
-        pid = process.pid
-        
-        # Create reader thread event for signaling
-        stop_event = threading.Event()
-        
-        def reader_thread():
-            """Thread to read process output."""
-            try:
-                while not stop_event.is_set():
-                    # Read with timeout to allow checking stop_event
-                    stdout_line = process.stdout.readline()
-                    if stdout_line:
-                        stdout_queue.put(stdout_line)
-                    
-                    stderr_line = process.stderr.readline()
-                    if stderr_line:
-                        stderr_queue.put(stderr_line)
-                    
-                    # Check if process has finished
-                    if process.poll() is not None:
-                        break
-                    
-                    time.sleep(0.1)  # Prevent busy waiting
-            except Exception as e:
-                stderr_queue.put(f"Error reading output: {str(e)}")
-            finally:
-                # Ensure remaining output is read
-                for line in process.stdout:
-                    stdout_queue.put(line)
-                for line in process.stderr:
-                    stderr_queue.put(line)
-        
-        # Start reader thread
-        reader = threading.Thread(target=reader_thread)
-        reader.daemon = True
-        reader.start()
-        
-        # Store session info
-        with session_lock:
-            active_sessions[pid] = {
-                "process": process,
-                "command": command,
-                "start_time": time.time(),
-                "stdout_queue": stdout_queue,
-                "stderr_queue": stderr_queue,
-                "reader_thread": reader,
-                "stop_event": stop_event
-            }
-            update_active_sessions_metric()
-        
-        # Wait for timeout
-        try:
-            process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            if not allow_background:
-                # Clean up if background not allowed
-                stop_event.set()
-                process.terminate()
+        # Handle background execution
+        if allow_background:
+            pid = process.pid
+            output_queue = queue.Queue()
+            
+            def read_output_thread(pipe, source):
                 try:
-                    process.wait(timeout=1)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                
-                with session_lock:
-                    if pid in active_sessions:
-                        del active_sessions[pid]
-                        update_active_sessions_metric()
-                
-                return {
-                    "status": "error",
-                    "error": "Command timed out",
-                    "pid": None,
-                    "runtime": timeout,
-                    "exit_code": None,
-                    "stdout": "".join(read_queue_contents(stdout_queue)),
-                    "stderr": "".join(read_queue_contents(stderr_queue))
-                }
-        
-        # Process completed within timeout
-        if process.returncode is not None:
-            stop_event.set()
-            reader.join(timeout=1)
+                    for line in pipe:
+                        output_queue.put({"source": source, "data": line})
+                except Exception as e:
+                    output_queue.put({"source": source, "data": f"Error reading output: {str(e)}\n"})
+                finally:
+                    try:
+                        pipe.close()
+                    except Exception:
+                        pass
+            
+            # Start output reading threads
+            stdout_thread = threading.Thread(target=read_output_thread, args=(process.stdout, "stdout"))
+            stderr_thread = threading.Thread(target=read_output_thread, args=(process.stderr, "stderr"))
+            stdout_thread.daemon = True
+            stderr_thread.daemon = True
+            stdout_thread.start()
+            stderr_thread.start()
             
             with session_lock:
-                if pid in active_sessions:
-                    del active_sessions[pid]
-                    update_active_sessions_metric()
+                active_sessions[pid] = {
+                    "process": process,
+                    "command": command,
+                    "start_time": start_time,
+                    "output_queue": output_queue,
+                    "stdout_thread": stdout_thread,
+                    "stderr_thread": stderr_thread
+                }
+                update_active_sessions_metric()
             
             return {
-                "status": "success" if process.returncode == 0 else "error",
-                "pid": None,
-                "runtime": time.time() - active_sessions[pid]["start_time"],
-                "exit_code": process.returncode,
-                "stdout": "".join(read_queue_contents(stdout_queue)),
-                "stderr": "".join(read_queue_contents(stderr_queue)),
-                "complete": True
+                "exit_code": None,
+                "stdout": "",
+                "stderr": "",
+                "pid": pid,
+                "runtime": time.time() - start_time,
+                "complete": False
             }
         
-        # Process is running in background
+        # Handle synchronous execution
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+            exit_code = process.returncode
+            complete = True
+        except subprocess.TimeoutExpired:
+            # Try to terminate the process group on Unix-like systems
+            if sys.platform != "win32":
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+            process.kill()
+            stdout, stderr = process.communicate()
+            exit_code = -1
+            complete = True
+            stderr += "\nCommand timed out"
+        
         return {
-            "status": "running",
-            "pid": pid,
-            "runtime": time.time() - active_sessions[pid]["start_time"],
-            "exit_code": None,
-            "stdout": "".join(read_queue_contents(stdout_queue)),
-            "stderr": "".join(read_queue_contents(stderr_queue)),
-            "complete": False
+            "exit_code": exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+            "pid": None,
+            "runtime": time.time() - start_time,
+            "complete": complete
         }
         
     except Exception as e:
         return {
-            "status": "error",
-            "error": str(e),
-            "pid": None,
-            "exit_code": 1,
+            "exit_code": None,
             "stdout": "",
-            "stderr": str(e)
+            "stderr": str(e),
+            "pid": None,
+            "runtime": time.time() - start_time,
+            "complete": True,
+            "error": str(e)
         }
 
 def read_queue_contents(q: queue.Queue) -> List[str]:
@@ -612,70 +618,106 @@ def read_queue_contents(q: queue.Queue) -> List[str]:
             break
     return contents
 
-@mcp.tool()
 def read_output(pid: int) -> Dict[str, Any]:
-    """Read output from a running command session."""
-    try:
-        with session_lock:
-            if pid not in active_sessions:
-                return {
-                    "status": "error",
-                    "error": f"No active session for PID {pid}",
-                    "pid": None,
-                    "stdout": "",
-                    "stderr": f"No active session found for PID {pid}",
-                    "complete": True
-                }
-            
-            session = active_sessions[pid]
-            process = session["process"]
-            stdout_queue = session["stdout_queue"]
-            stderr_queue = session["stderr_queue"]
+    """Read output from a background process.
+    
+    Args:
+        pid: Process ID of the background process
         
-        # Read available output
-        stdout = "".join(read_queue_contents(stdout_queue))
-        stderr = "".join(read_queue_contents(stderr_queue))
-        
-        # Check if process has completed
-        returncode = process.poll()
-        if returncode is not None:
-            # Process finished, clean up
-            session["stop_event"].set()
-            session["reader_thread"].join(timeout=1)
-            
-            with session_lock:
-                if pid in active_sessions:
-                    del active_sessions[pid]
-                    update_active_sessions_metric()
-            
+    Returns:
+        Dict containing:
+        - stdout: Standard output
+        - stderr: Standard error
+        - complete: Whether process has completed
+        - pid: Process ID (None if complete)
+        - runtime: Process runtime in seconds
+        - exit_code: Process exit code (None if still running)
+    """
+    with session_lock:
+        if pid not in active_sessions:
             return {
-                "status": "success" if returncode == 0 else "error",
+                "stdout": "",
+                "stderr": "Process not found",
+                "complete": True,
                 "pid": None,
-                "stdout": stdout,
-                "stderr": stderr,
-                "exit_code": returncode,
-                "complete": True
+                "runtime": 0,
+                "exit_code": None,
+                "error": "Process not found"
             }
         
-        # Process still running
-        return {
-            "status": "running",
-            "pid": pid,
-            "stdout": stdout,
-            "stderr": stderr,
-            "exit_code": None,
-            "complete": False
-        }
+        session = active_sessions[pid]
+        process = session["process"]
+        start_time = session["start_time"]
+        output_queue = session["output_queue"]
         
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "pid": None,
-            "stdout": "",
-            "stderr": str(e),
-            "complete": True
-        }
+        # Check if process has completed
+        if process.poll() is not None:
+            # Process finished, get final output
+            stdout, stderr = process.communicate()
+            exit_code = process.returncode
+            runtime = time.time() - start_time
+            
+            # Clean up threads
+            if "stdout_thread" in session:
+                session["stdout_thread"].join(timeout=1)
+            if "stderr_thread" in session:
+                session["stderr_thread"].join(timeout=1)
+            
+            # Clean up session
+            del active_sessions[pid]
+            update_active_sessions_metric()
+            
+            return {
+                "stdout": stdout,
+                "stderr": stderr,
+                "complete": True,
+                "pid": None,
+                "runtime": runtime,
+                "exit_code": exit_code
+            }
+        
+        # Process still running, get current output
+        try:
+            stdout = ""
+            stderr = ""
+            
+            # Read all available output from queue with a timeout
+            max_iterations = 100  # Prevent infinite loops
+            iteration = 0
+            while iteration < max_iterations:
+                try:
+                    output = output_queue.get_nowait()
+                    if output["source"] == "stdout":
+                        stdout += output["data"]
+                    else:
+                        stderr += output["data"]
+                except queue.Empty:
+                    break
+                iteration += 1
+            
+            # If we hit the max iterations, log a warning
+            if iteration >= max_iterations:
+                stderr += "\nWarning: Maximum iterations reached while reading output queue"
+            
+            return {
+                "stdout": stdout,
+                "stderr": stderr,
+                "complete": False,
+                "pid": pid,
+                "runtime": time.time() - start_time,
+                "exit_code": None
+            }
+            
+        except Exception as e:
+            return {
+                "stdout": "",
+                "stderr": str(e),
+                "complete": False,
+                "pid": pid,
+                "runtime": time.time() - start_time,
+                "exit_code": None,
+                "error": str(e)
+            }
 
 @mcp.resource("debug://state")
 def debug_state() -> Dict[str, Any]:
@@ -945,7 +987,7 @@ def git_operation(command: str, parameters: Dict[str, str] = None) -> Dict[str, 
             if parameters.get('delete'):
                 if not parameters.get('name'):
                     return {'status': 'error', 'error': 'Branch name required for deletion'}
-                cmd = ['git', 'branch', '-d', parameters['name']]
+                cmd = ['git', 'branch', '-D', parameters['name']]
             elif parameters.get('name'):
                 cmd = ['git', 'checkout', '-b', parameters['name']]
             else:
@@ -2294,51 +2336,153 @@ def _analyze_style(code: str) -> Dict[str, Any]:
         }
 
 def force_terminate(pid: int) -> Dict[str, Any]:
-    """Force terminate a process.
+    """Force terminate a background process.
     
     Args:
         pid: Process ID to terminate
         
     Returns:
-        Dictionary containing success status
+        Dict containing:
+        - success: Whether termination was successful
+        - error: Error message if any
     """
-    try:
-        os.kill(pid, signal.SIGTERM)
-        return {"success": True}
-    except ProcessLookupError:
-        return {"success": True}  # Process already terminated
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    with session_lock:
+        if pid not in active_sessions:
+            return {
+                "success": False,
+                "error": "Process not found"
+            }
+        
+        try:
+            session = active_sessions[pid]
+            process = session["process"]
+            
+            # Try graceful termination first
+            process.terminate()
+            try:
+                process.wait(timeout=3)  # Give it 3 seconds to terminate
+            except subprocess.TimeoutExpired:
+                # Force kill if it doesn't terminate
+                process.kill()
+                try:
+                    process.wait(timeout=1)  # Give it 1 second to die
+                except subprocess.TimeoutExpired:
+                    # If still not dead, try to kill the entire process group
+                    if sys.platform != "win32":
+                        try:
+                            os.killpg(os.getpgid(pid), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass  # Process already dead
+                    return {
+                        "success": False,
+                        "error": "Process could not be terminated"
+                    }
+            
+            # Clean up threads with timeouts
+            if "stdout_thread" in session:
+                try:
+                    session["stdout_thread"].join(timeout=1)
+                except Exception:
+                    pass  # Ignore thread join errors
+            if "stderr_thread" in session:
+                try:
+                    session["stderr_thread"].join(timeout=1)
+                except Exception:
+                    pass  # Ignore thread join errors
+            
+            # Clean up session
+            del active_sessions[pid]
+            update_active_sessions_metric()
+            
+            return {
+                "success": True
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
-def block_command(command: str) -> Dict[str, Any]:
+def block_command(command: str) -> dict:
     """Add a command to the blacklist.
-    
-    Args:
-        command: Command to block
-        
-    Returns:
-        Dictionary containing success status
-    """
-    try:
-        blacklisted_commands.add(command)
-        return {"success": True}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
 
-def unblock_command(command: str) -> Dict[str, Any]:
-    """Remove a command from the blacklist.
-    
     Args:
-        command: Command to unblock
-        
+        command (str): The command to block.
+
     Returns:
-        Dictionary containing success status
+        dict: A dictionary containing:
+            - success (bool): Whether the operation was successful.
+            - error (str, optional): Error message if operation failed.
     """
     try:
-        blacklisted_commands.remove(command)
+        with session_lock:
+            blacklisted_commands.add(command)
         return {"success": True}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {
+            "success": False,
+            "error": f"Failed to block command: {str(e)}"
+        }
+
+def unblock_command(command: str) -> dict:
+    """Remove a command from the blacklist.
+
+    Args:
+        command (str): The command to unblock.
+
+    Returns:
+        dict: A dictionary containing:
+            - success (bool): Whether the operation was successful.
+            - error (str, optional): Error message if operation failed.
+    """
+    try:
+        with session_lock:
+            blacklisted_commands.discard(command)
+        return {"success": True}
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to unblock command: {str(e)}"
+        }
+
+def list_sessions() -> dict:
+    """List all active command sessions.
+
+    Returns:
+        dict: A dictionary containing:
+            - sessions (list): List of active sessions, each containing:
+                - pid (int): Process ID
+                - command (str): Command being executed
+                - start_time (float): When the command started
+                - runtime (float): How long the command has been running
+            - error (str, optional): Error message if operation failed.
+    """
+    try:
+        with session_lock:
+            current_time = time.time()
+            sessions = []
+            for pid, session in active_sessions.items():
+                process = session["process"]
+                if process.poll() is None:  # Process is still running
+                    sessions.append({
+                        "pid": pid,
+                        "command": session["command"],
+                        "start_time": session["start_time"],
+                        "runtime": current_time - session["start_time"]
+                    })
+                else:
+                    # Process has completed, clean it up
+                    process.communicate()  # Ensure all output is read
+                    del active_sessions[pid]
+                    active_sessions_counter.set(len(active_sessions))
+
+            return {"sessions": sessions}
+    except Exception as e:
+        return {
+            "sessions": [],
+            "error": f"Failed to list sessions: {str(e)}"
+        }
 
 def main():
     # Set up the server

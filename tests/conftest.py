@@ -9,6 +9,15 @@ from contextlib import contextmanager
 from typing import Generator, Dict, Any
 import threading
 import time
+import asyncio
+from fastapi.testclient import TestClient
+from server.core.server import app as core_app
+from server.llm.server import app as llm_app
+from server.neod.server import app as neod_app
+from server.neoo.server import app as neoo_app
+from server.neolocal.server import app as neolocal_app
+from server.neollm.server import app as neollm_app
+from server.neodo.server import app as neodo_app
 
 # Add the parent directory to path to import the server module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -74,3 +83,82 @@ def blacklisted_commands() -> Generator[set, None, None]:
     mock_blacklist = original_blacklist.copy()
     yield mock_blacklist
     # Reset blacklist in cleanup 
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create an instance of the default event loop for each test case."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.fixture(scope="session")
+def core_client():
+    """Create a test client for the Core MCP Server."""
+    return TestClient(core_app)
+
+
+@pytest.fixture(scope="session")
+def llm_client():
+    """Create a test client for the LLM MCP Server."""
+    return TestClient(llm_app)
+
+
+@pytest.fixture(scope="session")
+def neod_client():
+    """Create a test client for the Neo Development Server."""
+    return TestClient(neod_app)
+
+
+@pytest.fixture(scope="session")
+def neoo_client():
+    """Create a test client for the Neo Operations Server."""
+    return TestClient(neoo_app)
+
+
+@pytest.fixture(scope="session")
+def neolocal_client():
+    """Create a test client for the Neo Local Server."""
+    return TestClient(neolocal_app)
+
+
+@pytest.fixture(scope="session")
+def neollm_client():
+    """Create a test client for the Neo Local LLM Server."""
+    return TestClient(neollm_app)
+
+
+@pytest.fixture(scope="session")
+def neodo_client():
+    """Create a test client for the Neo DO Server."""
+    return TestClient(neodo_app)
+
+
+@pytest.fixture(scope="session")
+def all_clients(core_client, llm_client, neod_client, neoo_client, neolocal_client, neollm_client, neodo_client):
+    """Return a dictionary of all test clients."""
+    return {
+        "core": core_client,
+        "llm": llm_client,
+        "neod": neod_client,
+        "neoo": neoo_client,
+        "neolocal": neolocal_client,
+        "neollm": neollm_client,
+        "neodo": neodo_client
+    }
+
+
+@pytest.fixture(scope="session")
+def test_environment():
+    """Set up test environment variables."""
+    os.environ["MCP_PORT"] = "7443"
+    os.environ["LLM_PORT"] = "7444"
+    os.environ["NEOD_PORT"] = "7445"
+    os.environ["NEOO_PORT"] = "7446"
+    os.environ["NEOLOCAL_PORT"] = "7447"
+    os.environ["NEOLM_PORT"] = "7448"
+    os.environ["NEODO_PORT"] = "7449"
+    os.environ["DO_TOKEN"] = "test_token"
+    yield
+    # Clean up environment variables if needed 

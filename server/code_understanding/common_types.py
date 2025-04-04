@@ -29,17 +29,53 @@ class MockNode:
         if self.metadata is None:
             self.metadata = {}
 
+    @property
+    def child_count(self) -> int:
+        """Get total number of children."""
+        return len(self.children)
+
+    @property
+    def named_child_count(self) -> int:
+        """Get number of named children."""
+        return len([child for child in self.children if child.type != 'unknown'])
+
+    def child(self, index: int) -> Optional["MockNode"]:
+        """Get child at index."""
+        try:
+            return self.children[index]
+        except IndexError:
+            return None
+
+    def named_child(self, index: int) -> Optional["MockNode"]:
+        """Get named child at index."""
+        named_children = [child for child in self.children if child.type != 'unknown']
+        try:
+            return named_children[index]
+        except IndexError:
+            return None
+
+    def field_name_for_child(self, index: int) -> Optional[str]:
+        """Get field name for child at index."""
+        try:
+            child = self.children[index]
+            for field_name, field_value in self.fields.items():
+                if isinstance(field_value, list):
+                    if child in field_value:
+                        return field_name
+                elif field_value == child:
+                    return field_name
+            return None
+        except IndexError:
+            return None
+
     def children_by_field_name(self, field_name: str) -> List["MockNode"]:
         """Get children associated with a specific field name."""
-        # This might need adjustment based on how fields vs children are used
         field_value = self.fields.get(field_name)
         if isinstance(field_value, list):
             return field_value
         elif isinstance(field_value, MockNode):
             return [field_value]
         return []
-        # # Alternative: check children based on a hypothetical 'field' attr?
-        # return [child for child in self.children if getattr(child, 'field', None) == field_name]
 
     def child_by_field_name(self, field_name: str) -> Optional["MockNode"]:
         """Get a single child node associated with a field name."""
@@ -47,8 +83,7 @@ class MockNode:
         if isinstance(field_value, MockNode):
              return field_value
         elif isinstance(field_value, list) and field_value:
-             # Return first element if it's a list?
-             # Or should this only return non-list fields? Decide based on usage.
+             # Return first element if it's a list
              if isinstance(field_value[0], MockNode):
                   return field_value[0]
         return None
@@ -85,16 +120,24 @@ class MockTree:
         """Get a field from the root node."""
         return self.root_node.fields.get(field_name) if self.root_node else None
 
+    def __getitem__(self, key: str) -> Any:
+        """Allow dictionary-style access to features."""
+        return self.features.get(key)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Allow dictionary-style setting of features."""
+        self.features[key] = value
+
+    def __contains__(self, key: str) -> bool:
+        """Check if a feature exists."""
+        return key in self.features
+
     def __str__(self) -> str:
         """String representation of the tree."""
         return f"MockTree(type={self.type}, has_errors={self.has_errors}, error_count={len(self.error_details)})"
 
     def __repr__(self) -> str:
-        """Get a detailed string representation of the tree.
-        
-        Returns:
-            str: A detailed string representation of the tree.
-        """
+        """Get a detailed string representation of the tree."""
         return str(self)
 
     def walk(self) -> Iterator[MockNode]:
@@ -102,4 +145,33 @@ class MockTree:
         if self.root_node:
             return self.root_node.walk()
         else:
-            return iter([]) # Return empty iterator if no root 
+            return iter([]) # Return empty iterator if no root
+
+    def add_error(self, error: Dict) -> None:
+        """Add an error to the tree."""
+        self.has_errors = True
+        self.error_details.append(error)
+
+    def add_feature(self, feature_type: str, feature_data: Any) -> None:
+        """Add a feature to the tree.
+        
+        Args:
+            feature_type: The type of feature (e.g., 'function', 'class', 'import').
+            feature_data: The feature data to add.
+        """
+        if feature_type not in self.features:
+            self.features[feature_type] = []
+        self.features[feature_type].append(feature_data)
+
+    def get_features(self, feature_type: str) -> List[Any]:
+        """Get all features of a specific type."""
+        return self.features.get(feature_type, [])
+
+    def clear_features(self) -> None:
+        """Clear all features."""
+        self.features.clear()
+
+    def clear_errors(self) -> None:
+        """Clear all errors."""
+        self.has_errors = False
+        self.error_details.clear() 

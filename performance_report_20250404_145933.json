@@ -1,0 +1,30 @@
+{
+  "timestamp": "2025-04-04T14:59:33.215351",
+  "tests": {
+    "health_check": {
+      "status": "failed",
+      "error": "object Response can't be used in 'await' expression"
+    },
+    "tool_registration": {
+      "status": "failed",
+      "error": "object Response can't be used in 'await' expression"
+    },
+    "tool_execution": {
+      "status": "failed",
+      "error": "object Response can't be used in 'await' expression"
+    },
+    "file_operation": {
+      "status": "failed",
+      "error": "object Response can't be used in 'await' expression"
+    },
+    "system_info": {
+      "status": "failed",
+      "error": "object Response can't be used in 'await' expression"
+    },
+    "concurrent_operations": {
+      "status": "failed",
+      "error": "An asyncio.Future, a coroutine or an awaitable is required"
+    }
+  },
+  "overall_score": 0.0
+}

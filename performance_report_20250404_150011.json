@@ -1,0 +1,62 @@
+{
+  "timestamp": "2025-04-04T15:00:11.712544",
+  "tests": {
+    "health_check": {
+      "status": "passed",
+      "result": {
+        "mean": 0.001241016387939453,
+        "stdev": 0.0021228096693256273,
+        "min": 0.0004889965057373047,
+        "max": 0.0072782039642333984,
+        "iterations": 10
+      }
+    },
+    "tool_registration": {
+      "status": "passed",
+      "result": {
+        "mean": 0.0005877971649169922,
+        "stdev": 4.797228281655074e-05,
+        "min": 0.0005340576171875,
+        "max": 0.0006871223449707031,
+        "iterations": 10
+      }
+    },
+    "tool_execution": {
+      "status": "passed",
+      "result": {
+        "mean": 0.0006011009216308593,
+        "stdev": 3.025856469088202e-05,
+        "min": 0.0005450248718261719,
+        "max": 0.0006389617919921875,
+        "iterations": 10
+      }
+    },
+    "file_operation": {
+      "status": "passed",
+      "result": {
+        "mean": 0.0006159782409667969,
+        "stdev": 0.00011426683934965584,
+        "min": 0.0004849433898925781,
+        "max": 0.000804901123046875,
+        "iterations": 10
+      }
+    },
+    "system_info": {
+      "status": "passed",
+      "result": {
+        "mean": 0.0005499124526977539,
+        "stdev": 2.8177415936770443e-05,
+        "min": 0.0005083084106445312,
+        "max": 0.0006117820739746094,
+        "iterations": 10
+      }
+    },
+    "concurrent_operations": {
+      "status": "passed",
+      "result": {
+        "total_time": 0.0016322135925292969
+      }
+    }
+  },
+  "overall_score": 100.0
+}
