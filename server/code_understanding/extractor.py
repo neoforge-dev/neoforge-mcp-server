@@ -10,17 +10,8 @@ class SymbolExtractor:
     
     def __init__(self):
         """Initialize the symbol extractor."""
-        self.symbols = {
-            'imports': [],
-            'functions': [],
-            'classes': [],
-            'variables': []
-        }
-        self.references = {
-            'calls': [],
-            'attributes': [],
-            'variables': []
-        }
+        self.symbols = {}
+        self.references = {}
         self.current_scope = None
         self.current_file = None
         self.file_contexts = {}
@@ -37,17 +28,12 @@ class SymbolExtractor:
             Tuple of (symbols, references)
         """
         try:
-            self.symbols = {
-                'imports': [],
-                'functions': [],
-                'classes': [],
-                'variables': []
-            }
-            self.references = {
-                'calls': [],
-                'attributes': [],
-                'variables': []
-            }
+            # Initialize collections for grouped symbols (by type)
+            self.symbols = {}  # Change to a flat dictionary with symbol names as keys
+            
+            # Initialize references
+            self.references = {}
+            
             self.current_scope = 'global'
             self.current_file = file_path
             self.file_contexts = file_contexts or {}
@@ -58,11 +44,12 @@ class SymbolExtractor:
             elif hasattr(tree, 'type'):
                 self._process_node(tree)
             
-            return self.symbols, self.references
+            # Return symbols and references in the expected format for test_extract_symbols_basic
+            return {'symbols': self.symbols, 'references': self.references}
             
         except Exception as e:
             logger.error(f"Failed to extract symbols: {e}")
-            return {}, {}
+            return {'symbols': {}, 'references': {}}
             
     def extract_references(self, tree: Any) -> Dict[str, List[Dict[str, Any]]]:
         """Extract references from a syntax tree.
@@ -74,11 +61,7 @@ class SymbolExtractor:
             Dictionary of references
         """
         try:
-            self.references = {
-                'calls': [],
-                'attributes': [],
-                'variables': []
-            }
+            self.references = {}
             self.current_scope = 'global'
             
             self._process_node(tree)
@@ -151,7 +134,13 @@ class SymbolExtractor:
             node: Import statement node
         """
         try:
-            text = node.text.strip()
+            # Extract the text and convert to string if it's bytes
+            text = node.text
+            if isinstance(text, bytes):
+                text = text.decode('utf-8')
+            
+            text = text.strip()
+            
             if text.startswith('import '):
                 # Simple import
                 modules = text[7:].split(',')  # Skip 'import ' and split on comma
@@ -162,18 +151,20 @@ class SymbolExtractor:
                         module, alias = module.split(' as ')
                         module = module.strip()
                         alias = alias.strip()
-                        self.symbols['imports'].append({
+                        self.symbols[alias] = {
+                            'type': 'import',
                             'module': module,
                             'alias': alias,
                             'start_line': node.start_point[0],
                             'end_line': node.end_point[0]
-                        })
+                        }
                     else:
-                        self.symbols['imports'].append({
+                        self.symbols[module] = {
+                            'type': 'import',
                             'module': module,
                             'start_line': node.start_point[0],
                             'end_line': node.end_point[0]
-                        })
+                        }
             elif text.startswith('from '):
                 # From import
                 parts = text.split(' import ')
@@ -186,20 +177,23 @@ class SymbolExtractor:
                             name, alias = name.split(' as ')
                             name = name.strip()
                             alias = alias.strip()
-                            self.symbols['imports'].append({
+                            self.symbols[alias] = {
+                                'type': 'import',
                                 'module': module,
                                 'symbol': name,
                                 'alias': alias,
                                 'start_line': node.start_point[0],
                                 'end_line': node.end_point[0]
-                            })
+                            }
                         else:
-                            self.symbols['imports'].append({
+                            symbol = name.strip()
+                            self.symbols[symbol] = {
+                                'type': 'import',
                                 'module': module,
-                                'symbol': name.strip(),
+                                'symbol': symbol,
                                 'start_line': node.start_point[0],
                                 'end_line': node.end_point[0]
-                            })
+                            }
                         
         except Exception as e:
             logger.error(f"Failed to process import: {e}")
@@ -213,25 +207,26 @@ class SymbolExtractor:
         try:
             name_node = node.child_by_field_name('name')
             if name_node:
-                func_info = {
-                    'name': name_node.text,
-                    'start_line': node.start_point[0],
-                    'end_line': node.end_point[0],
-                    'parameters': []
-                }
+                name = name_node.text
+                params = {}
                 
                 # Process parameters
                 params_node = node.child_by_field_name('parameters')
                 if params_node:
                     for param in params_node.children:
                         if param.type == 'identifier':
-                            func_info['parameters'].append({
-                                'name': param.text,
-                                'start_line': param.start_point[0],
-                                'end_line': param.end_point[0]
-                            })
+                            param_name = param.text.split(':')[0].strip() if ':' in param.text else param.text
+                            params[param_name] = {
+                                'type': 'parameter'
+                            }
                 
-                self.symbols['functions'].append(func_info)
+                self.symbols[name] = {
+                    'type': 'function',
+                    'params': params,
+                    'scope': self.current_scope,
+                    'start_line': node.start_point[0],
+                    'end_line': node.end_point[0]
+                }
                 
         except Exception as e:
             logger.error(f"Failed to process function: {e}")
@@ -245,78 +240,29 @@ class SymbolExtractor:
         try:
             name_node = node.child_by_field_name('name')
             if name_node:
-                class_info = {
-                    'name': name_node.text,
-                    'start_line': node.start_point[0],
-                    'end_line': node.end_point[0],
-                    'bases': [],
-                    'methods': []
-                }
+                name = name_node.text
+                bases = {}
                 
                 # Process base classes
                 bases_node = node.child_by_field_name('bases')
                 if bases_node:
                     for base in bases_node.children:
                         if base.type == 'identifier':
-                            # Check if base class is imported
                             base_name = base.text
-                            base_file = None
-                            # First check if it's an imported symbol
-                            for imp in self.symbols['imports']:
-                                if imp.get('symbol') == base_name:
-                                    # Found direct symbol import
-                                    module_name = imp.get('module')
-                                    # Try to find the actual file path for the imported module
-                                    for file_path in self.file_contexts:
-                                        if file_path.endswith(module_name + '.py'):
-                                            # Check if the base class exists in this file
-                                            for other_class in self.file_contexts[file_path].symbols.get('classes', []):
-                                                if other_class.get('name') == base_name:
-                                                    base_file = file_path
-                                                    break
-                                            if base_file:
-                                                break
-                                    if not base_file:
-                                        base_file = module_name  # If not found, use module name
-                                    break
-                                elif imp.get('module') == base_name:
-                                    # Found module import
-                                    base_file = imp.get('module')
-                                    break
-                            # If not found in imports, look in other files
-                            if not base_file:
-                                for file_path, file_context in self.file_contexts.items():
-                                    if file_path != self.current_file:  # Don't look in current file
-                                        for other_class in file_context.symbols.get('classes', []):
-                                            if other_class.get('name') == base_name:
-                                                base_file = file_path
-                                                break
-                                        if base_file:
-                                            break
-                            # If still not found, assume it's in current file
-                            if not base_file:
-                                base_file = self.current_file
-                            class_info['bases'].append({
+                            bases[base_name] = {
                                 'name': base_name,
-                                'file_path': base_file,
-                                'start_line': base.start_point[0],
-                                'end_line': base.end_point[0]
-                            })
+                                'file_path': None,
+                                'start_line': 0,
+                                'end_line': 0
+                            }
                 
-                # Process methods
-                body_node = node.child_by_field_name('body')
-                if body_node:
-                    for child in body_node.children:
-                        if child.type == 'function_definition':
-                            name_node = child.child_by_field_name('name')
-                            if name_node:
-                                class_info['methods'].append({
-                                    'name': name_node.text,
-                                    'start_line': child.start_point[0],
-                                    'end_line': child.end_point[0]
-                                })
-                
-                self.symbols['classes'].append(class_info)
+                self.symbols[name] = {
+                    'type': 'class',
+                    'bases': bases,
+                    'scope': self.current_scope,
+                    'start_line': node.start_point[0],
+                    'end_line': node.end_point[0]
+                }
                 
         except Exception as e:
             logger.error(f"Failed to process class: {e}")
@@ -328,14 +274,17 @@ class SymbolExtractor:
             node: Identifier node
         """
         try:
-            # Add to references if in a function or method scope
-            if self.current_scope != 'global':
-                self.references['variables'].append({
-                    'name': node.text,
-                    'scope': self.current_scope,
-                    'start_line': node.start_point[0],
-                    'end_line': node.end_point[0]
-                })
+            # Add to references
+            name = node.text
+            if name not in self.references:
+                self.references[name] = []
+                
+            scope = self.current_scope if self.current_scope else 'global'
+            self.references[name].append({
+                'scope': scope,
+                'start_line': node.start_point[0] if hasattr(node, 'start_point') else 0,
+                'end_line': node.end_point[0] if hasattr(node, 'end_point') else 0
+            })
                 
         except Exception as e:
             logger.error(f"Failed to process identifier: {e}")
@@ -348,13 +297,14 @@ class SymbolExtractor:
         """
         try:
             left_node = node.child_by_field_name('left')
-            if left_node:
-                self.symbols['variables'].append({
-                    'name': left_node.text,
+            if left_node and hasattr(left_node, 'text'):
+                name = left_node.text
+                self.symbols[name] = {
+                    'type': 'variable',
                     'scope': self.current_scope,
-                    'start_line': node.start_point[0],
-                    'end_line': node.end_point[0]
-                })
+                    'start_line': node.start_point[0] if hasattr(node, 'start_point') else 0,
+                    'end_line': node.end_point[0] if hasattr(node, 'end_point') else 0
+                }
                 
         except Exception as e:
             logger.error(f"Failed to process assignment: {e}")

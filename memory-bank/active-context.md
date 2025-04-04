@@ -33,6 +33,8 @@
 - Implementing JavaScript code understanding support
 - Fixing issues with tree-sitter integration
 - Improving AST conversion and error handling
+- Implementing Swift support in the code understanding system
+- Completed comprehensive test suite for SwiftUI features
 
 ## Recent Changes
 - **Fixed Language Adapter Tests:** Resolved failures in `test_language_adapters.py` by correcting JS root node type conversion and adding `ValueError` for empty input to both JS and Swift parsers.
@@ -90,6 +92,39 @@
 - Added package and dependency analysis
 - Implemented full test suite
 - Added detailed error handling and logging
+- Added test cases for SwiftUI features:
+  - View modifiers
+  - Environment values
+  - Preview providers
+  - Gestures
+  - Animations
+  - Sheets
+  - Navigation
+  - TabView
+  - Alerts
+  - Forms
+  - Lists
+  - Grids
+  - Transitions
+  - GeometryReader
+  - ScrollView
+  - AsyncImage
+  - Custom modifiers
+  - EnvironmentObject
+  - Custom bindings
+  - PreferenceKey
+  - Custom transitions
+  - Custom gestures
+  - Custom animations
+  - Custom transition animations
+  - Custom gesture sequences
+  - Custom animation sequences
+  - Custom transition sequences
+  - Custom gesture sequence animations
+  - Custom animation sequence curves
+  - Custom transition sequence curves
+  - Custom gesture sequence animation curves
+  - Custom animation sequence curve priorities
 
 ## Implementation Plan
 1. AI Coding Agent MCP Tools (NEW HIGHEST PRIORITY)
@@ -220,6 +255,11 @@
    - Profile code execution
    - Optimize memory usage
    - Add caching where beneficial
+10. Implement the Swift parser adapter to handle all the test cases
+11. Add support for Swift Package Manager integration
+12. Implement dependency analysis for Swift projects
+13. Add documentation for Swift support
+14. Create integration tests for Swift features
 
 ## Active Decisions
 - Confirmed `CodeAnalyzer` separates top-level functions from class methods.
@@ -227,6 +267,10 @@
 - 1. Using tree-sitter for JavaScript parsing
 - 2. Unified AST representation with MockTree/MockNode
 - 3. Feature-based metadata for JavaScript-specific constructs
+- Using tree-sitter for Swift parsing
+- Supporting modern Swift features (async/await, property wrappers, etc.)
+- Comprehensive SwiftUI support
+- Test-driven development approach
 
 ## Known Issues
 - ⚠️ **Low Code Coverage:** Overall coverage is ~12%, significantly below the 90% target. Many components have low or zero coverage, **including the new JS adapter code.**

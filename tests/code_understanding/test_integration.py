@@ -3,7 +3,7 @@
 import pytest
 from server.code_understanding.parser import MockNode as Node, MockTree as Tree, CodeParser
 from server.code_understanding.analyzer import CodeAnalyzer
-from server.code_understanding.symbols import SymbolExtractor
+from server.code_understanding.extractor import SymbolExtractor
 
 @pytest.fixture
 def sample_code():

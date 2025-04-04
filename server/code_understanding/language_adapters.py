@@ -195,11 +195,11 @@ class JavaScriptParserAdapter:
             if not code.strip():
                 return MockTree(
                     features={
-                        'imports': [],
-                        'functions': [],
-                        'classes': [],
+                    'imports': [],
+                    'functions': [],
+                    'classes': [],
                         'variables': set(),  # Use a set to avoid duplicates
-                        'exports': [],
+                    'exports': [],
                         'has_errors': False,
                         'error_details': []
                     }
@@ -223,51 +223,51 @@ class JavaScriptParserAdapter:
                 'has_errors': False,
                 'error_details': []
             }
-
+            
             def visit_node(node):
                 try:
-                    if node.type == 'import_statement':
-                        # Handle ES6 imports
-                        source_node = node.child_by_field_name('source')
-                        if source_node:
-                            source = source_node.text.decode('utf-8').strip("'\"")
-                            
-                            # Check for default import
-                            import_clause = node.child_by_field_name('import_clause')
-                            if import_clause:
+                if node.type == 'import_statement':
+                    # Handle ES6 imports
+                    source_node = node.child_by_field_name('source')
+                    if source_node:
+                        source = source_node.text.decode('utf-8').strip("'\"")
+                        
+                        # Check for default import
+                        import_clause = node.child_by_field_name('import_clause')
+                        if import_clause:
                                 # Handle default import
                                 if import_clause.type == 'identifier':
-                                    results['imports'].append({
+                                results['imports'].append({
                                         'name': import_clause.text.decode('utf-8'),
-                                        'type': 'import',
-                                        'module': source,
-                                        'is_default': True
-                                    })
+                                    'type': 'import',
+                                    'module': source,
+                                    'is_default': True
+                                })
                                 else:
                                     # Handle named imports
                                     named_imports = import_clause.child_by_field_name('named_imports')
-                                    if named_imports:
-                                        for specifier in named_imports.named_children:
-                                            if specifier.type == 'import_specifier':
+                        if named_imports:
+                            for specifier in named_imports.named_children:
+                                if specifier.type == 'import_specifier':
                                                 name = None
                                                 for child in specifier.named_children:
                                                     if child.type == 'identifier':
                                                         name = child
                                                         break
-                                                if name:
-                                                    results['imports'].append({
-                                                        'name': name.text.decode('utf-8'),
-                                                        'type': 'import',
-                                                        'module': source,
-                                                        'is_default': False
-                                                    })
+                                    if name:
+                                        results['imports'].append({
+                                            'name': name.text.decode('utf-8'),
+                                            'type': 'import',
+                                            'module': source,
+                                            'is_default': False
+                                        })
                                     # Handle default import in named imports
                                     default_import = import_clause.child_by_field_name('name')
                                     if default_import:
-                                        results['imports'].append({
+                                results['imports'].append({
                                             'name': default_import.text.decode('utf-8'),
-                                            'type': 'import',
-                                            'module': source,
+                                    'type': 'import',
+                                    'module': source,
                                             'is_default': True
                                         })
 
@@ -278,8 +278,8 @@ class JavaScriptParserAdapter:
                             func_text = func.text.decode('utf-8')
                             if func_text == 'require':
                                 args = node.child_by_field_name('arguments')
-                                if args and args.named_children:
-                                    source = args.named_children[0].text.decode('utf-8').strip("'\"")
+                                    if args and args.named_children:
+                                        source = args.named_children[0].text.decode('utf-8').strip("'\"")
                                     # Get the variable name from the parent node
                                     parent = node.parent
                                     if parent and parent.type == 'variable_declarator':
@@ -312,9 +312,9 @@ class JavaScriptParserAdapter:
                     elif node.type == 'function_declaration':
                         # Handle function declarations
                         name = node.child_by_field_name('name')
-                        if name:
+                            if name:
                             func_info = {
-                                'name': name.text.decode('utf-8'),
+                                    'name': name.text.decode('utf-8'),
                                 'is_async': 'async' in node.text.decode('utf-8'),
                                 'is_method': False,
                                 'is_arrow': False
@@ -326,9 +326,9 @@ class JavaScriptParserAdapter:
                         parent = node.parent
                         if parent and parent.type == 'variable_declarator':
                             name = parent.child_by_field_name('name')
-                            if name:
+                                if name:
                                 func_info = {
-                                    'name': name.text.decode('utf-8'),
+                                        'name': name.text.decode('utf-8'),
                                     'is_async': 'async' in node.text.decode('utf-8'),
                                     'is_method': False,
                                     'is_arrow': True
@@ -337,10 +337,10 @@ class JavaScriptParserAdapter:
 
                     elif node.type == 'method_definition':
                         # Handle class methods
-                        name = node.child_by_field_name('name')
-                        if name:
+                    name = node.child_by_field_name('name')
+                    if name:
                             method_info = {
-                                'name': name.text.decode('utf-8'),
+                            'name': name.text.decode('utf-8'),
                                 'is_async': 'async' in node.text.decode('utf-8'),
                                 'is_method': True,
                                 'is_static': 'static' in node.text.decode('utf-8'),
@@ -350,12 +350,12 @@ class JavaScriptParserAdapter:
                             if results['classes']:
                                 results['classes'][-1]['methods'].append(method_info)
 
-                    elif node.type == 'class_declaration':
+                elif node.type == 'class_declaration':
                         # Handle class declarations
-                        name = node.child_by_field_name('name')
-                        if name:
-                            class_info = {
-                                'name': name.text.decode('utf-8'),
+                    name = node.child_by_field_name('name')
+                    if name:
+                        class_info = {
+                            'name': name.text.decode('utf-8'),
                                 'methods': [],
                                 'fields': [],
                                 'decorators': []
@@ -365,7 +365,7 @@ class JavaScriptParserAdapter:
                                 class_info['decorators'].append({
                                     'name': node.prev_sibling.child_by_field_name('name').text.decode('utf-8')
                                 })
-                            results['classes'].append(class_info)
+                        results['classes'].append(class_info)
 
                     elif node.type == 'field_definition':
                         # Handle class fields
@@ -386,8 +386,8 @@ class JavaScriptParserAdapter:
                         is_const = kind and kind.text.decode('utf-8') == 'const'
                         
                         for declarator in node.named_children:
-                            if declarator.type == 'variable_declarator':
-                                name = declarator.child_by_field_name('name')
+                        if declarator.type == 'variable_declarator':
+                            name = declarator.child_by_field_name('name')
                                 value = declarator.child_by_field_name('value')
                                 
                                 # Skip require() calls as they're handled as imports
@@ -396,7 +396,7 @@ class JavaScriptParserAdapter:
                                     if func and func.text.decode('utf-8') == 'require':
                                         continue
                                 
-                                if name:
+                            if name:
                                     var_info = {
                                         'name': name.text.decode('utf-8'),
                                         'is_const': is_const,
@@ -483,14 +483,14 @@ class JavaScriptParserAdapter:
             logger.error(f"Error parsing JavaScript code: {e}")
             return MockTree(
                 features={
-                    'imports': [],
-                    'functions': [],
-                    'classes': [],
-                    'variables': [],
+                'imports': [],
+                'functions': [],
+                'classes': [],
+                'variables': [],
                     'exports': [],
                     'has_errors': True,
                     'error_details': [{'message': str(e)}]
-                }
+            }
             )
 
     def _tree_sitter_to_mock_node(self, node: Any) -> MockNode:
@@ -643,11 +643,512 @@ class JavaScriptParserAdapter:
             logger.error(f"Error analyzing JavaScript code: {str(e)}")
             return {'error': str(e)}
 
-class SwiftParserAdapter:
-    def parse(self, code: str) -> Optional[MockTree]:
-        if not code or code.strip() == '':
+class SwiftParserAdapter(LanguageAdapter):
+    """Parser adapter for Swift code using tree-sitter."""
+    
+    def __init__(self):
+        """Initialize the Swift parser adapter."""
+        self.logger = logging.getLogger(__name__)
+        self.parser = Parser()
+        self.language = None
+        self._setup_language()
+        
+    def _setup_language(self) -> None:
+        """Set up the Swift language parser."""
+        try:
+            # Get the vendor directory path
+            vendor_dir = os.path.join(os.path.dirname(__file__), '..', 'vendor')
+            languages_dir = os.path.join(vendor_dir, 'tree-sitter-languages')
+            
+            # Clone tree-sitter-swift if not exists
+            swift_dir = os.path.join(languages_dir, 'tree-sitter-swift')
+            if not os.path.exists(swift_dir):
+                os.makedirs(languages_dir, exist_ok=True)
+                subprocess.run(['git', 'clone', 'https://github.com/tree-sitter/tree-sitter-swift.git', swift_dir], 
+                             check=True, cwd=languages_dir)
+            
+            # Build the language library
+            build_dir = os.path.join(swift_dir, 'src')
+            if not os.path.exists(os.path.join(build_dir, 'languages.so')):
+                subprocess.run(['make'], check=True, cwd=build_dir)
+            
+            # Load the language
+            self.language = Language(os.path.join(build_dir, 'languages.so'), 'swift')
+            self.parser.set_language(self.language)
+            logger.info("Swift language loaded successfully.")
+            
+        except Exception as e:
+            logger.error(f"Failed to set up Swift language: {str(e)}")
+            self.language = None
+            self.parser = None
+    
+    def parse(self, code: str) -> MockTree:
+        """Parse Swift code and return a MockTree with features.
+        
+        Args:
+            code: Swift source code to parse
+            
+        Returns:
+            MockTree containing the parsed code with features
+            
+        Raises:
+            ValueError: If code is empty or parsing fails
+        """
+        if not code or not code.strip():
             raise ValueError("Input code cannot be empty or whitespace only.")
-        # For now, bypass validation and return a mock tree with a 'source_file' root node
-        logger.warning("Swift parsing not implemented, returning basic mock tree.")
-        root = MockNode(type='source_file', text='source_file')
-        return MockTree(root) 
+            
+        try:
+            # Parse the code
+            tree = self.parser.parse(bytes(code, 'utf8'))
+            if not tree:
+                raise ValueError("Failed to parse code")
+                
+            # Convert to MockTree
+            mock_tree = MockTree()
+            mock_tree.root_node = self._convert_node(tree.root_node)
+            
+            # Extract features
+            self._extract_features(mock_tree.root_node)
+            
+            return mock_tree
+            
+        except Exception as e:
+            logger.error(f"Failed to parse Swift code: {str(e)}")
+            raise ValueError(f"Failed to parse Swift code: {str(e)}")
+    
+    def _convert_node(self, node: Node) -> MockNode:
+        """Convert a tree-sitter node to a MockNode.
+        
+        Args:
+            node: Tree-sitter node to convert
+            
+        Returns:
+            MockNode with the same structure
+        """
+        if not node:
+            return None
+            
+        mock_node = MockNode()
+        mock_node.type = node.type
+        mock_node.text = node.text.decode('utf8')
+        mock_node.start_point = node.start_point
+        mock_node.end_point = node.end_point
+        
+        # Convert children
+        for child in node.children:
+            mock_child = self._convert_node(child)
+            if mock_child:
+                mock_node.children.append(mock_child)
+                
+        return mock_node
+    
+    def _extract_features(self, node: MockNode) -> None:
+        """Extract features from the AST.
+        
+        Args:
+            node: Root node of the AST
+        """
+        if not node:
+            return
+            
+        try:
+            # Process imports
+            if node.type == 'import_declaration':
+                self._process_import(node)
+                
+            # Process functions
+            elif node.type == 'function_declaration':
+                self._process_function(node)
+                
+            # Process classes/structs
+            elif node.type in ['class_declaration', 'struct_declaration']:
+                self._process_class(node)
+                
+            # Process variables
+            elif node.type == 'variable_declaration':
+                self._process_variable(node)
+                
+            # Process extensions
+            elif node.type == 'extension_declaration':
+                self._process_extension(node)
+                
+            # Process protocols
+            elif node.type == 'protocol_declaration':
+                self._process_protocol(node)
+                
+            # Process SwiftUI views
+            elif node.type == 'struct_declaration' and self._is_swiftui_view(node):
+                self._process_swiftui_view(node)
+                
+            # Process property wrappers
+            elif node.type == 'property_wrapper':
+                self._process_property_wrapper(node)
+                
+            # Recursively process children
+            for child in node.children:
+                self._extract_features(child)
+                
+        except Exception as e:
+            logger.error(f"Error extracting features from node {node.type}: {str(e)}")
+    
+    def _process_import(self, node: MockNode) -> None:
+        """Process an import declaration.
+        
+        Args:
+            node: Import declaration node
+        """
+        try:
+            # Extract module name
+            module_node = next((child for child in node.children if child.type == 'identifier'), None)
+            if not module_node:
+                return
+                
+            module_name = module_node.text
+            
+            # Add to imports
+            self.imports.append({
+                'name': module_name,
+                'type': 'import',
+                'module': module_name,
+                'is_default': False
+            })
+            
+        except Exception as e:
+            logger.error(f"Error processing import: {str(e)}")
+    
+    def _process_function(self, node: MockNode) -> None:
+        """Process a function declaration.
+        
+        Args:
+            node: Function declaration node
+        """
+        try:
+            # Extract function name
+            name_node = next((child for child in node.children if child.type == 'identifier'), None)
+            if not name_node:
+                return
+                
+            name = name_node.text
+            
+            # Check if async
+            is_async = any(child.type == 'async_keyword' for child in node.children)
+            
+            # Extract parameters
+            params = []
+            param_list = next((child for child in node.children if child.type == 'parameter_list'), None)
+            if param_list:
+                for param in param_list.children:
+                    if param.type == 'parameter':
+                        param_name = next((child.text for child in param.children if child.type == 'identifier'), None)
+                        if param_name:
+                            params.append(param_name)
+            
+            # Add to functions
+            self.functions.append({
+                'name': name,
+                'type': 'function',
+                'params': params,
+                'is_async': is_async,
+                'start_line': node.start_point[0] + 1,
+                'end_line': node.end_point[0] + 1
+            })
+            
+        except Exception as e:
+            logger.error(f"Error processing function: {str(e)}")
+    
+    def _process_class(self, node: MockNode) -> None:
+        """Process a class or struct declaration.
+        
+        Args:
+            node: Class/struct declaration node
+        """
+        try:
+            # Extract class name
+            name_node = next((child for child in node.children if child.type == 'identifier'), None)
+            if not name_node:
+                return
+                
+            name = name_node.text
+            
+            # Extract inheritance
+            inheritance = []
+            inheritance_list = next((child for child in node.children if child.type == 'inheritance_list'), None)
+            if inheritance_list:
+                for base in inheritance_list.children:
+                    if base.type == 'identifier':
+                        inheritance.append(base.text)
+            
+            # Extract methods
+            methods = []
+            body = next((child for child in node.children if child.type == 'declaration_list'), None)
+            if body:
+                for child in body.children:
+                    if child.type == 'function_declaration':
+                        method = self._process_function(child)
+                        if method:
+                            methods.append(method)
+            
+            # Add to classes
+            self.classes.append({
+                'name': name,
+                'type': 'class' if node.type == 'class_declaration' else 'struct',
+                'inheritance': inheritance,
+                'methods': methods,
+                'start_line': node.start_point[0] + 1,
+                'end_line': node.end_point[0] + 1
+            })
+            
+        except Exception as e:
+            logger.error(f"Error processing class: {str(e)}")
+    
+    def _process_variable(self, node: MockNode) -> None:
+        """Process a variable declaration.
+        
+        Args:
+            node: Variable declaration node
+        """
+        try:
+            # Extract variable name
+            name_node = next((child for child in node.children if child.type == 'identifier'), None)
+            if not name_node:
+                return
+                
+            name = name_node.text
+            
+            # Check if property wrapper
+            has_wrapper = any(child.type == 'property_wrapper' for child in node.children)
+            
+            # Add to variables
+            self.variables.append({
+                'name': name,
+                'type': 'variable',
+                'has_wrapper': has_wrapper,
+                'start_line': node.start_point[0] + 1,
+                'end_line': node.end_point[0] + 1
+            })
+            
+        except Exception as e:
+            logger.error(f"Error processing variable: {str(e)}")
+    
+    def _process_extension(self, node: MockNode) -> None:
+        """Process an extension declaration.
+        
+        Args:
+            node: Extension declaration node
+        """
+        try:
+            # Extract extended type
+            type_node = next((child for child in node.children if child.type == 'identifier'), None)
+            if not type_node:
+                return
+                
+            extended_type = type_node.text
+            
+            # Extract methods
+            methods = []
+            body = next((child for child in node.children if child.type == 'declaration_list'), None)
+            if body:
+                for child in body.children:
+                    if child.type == 'function_declaration':
+                        method = self._process_function(child)
+                        if method:
+                            methods.append(method)
+            
+            # Add to extensions
+            self.extensions.append({
+                'type': extended_type,
+                'methods': methods,
+                'start_line': node.start_point[0] + 1,
+                'end_line': node.end_point[0] + 1
+            })
+            
+        except Exception as e:
+            logger.error(f"Error processing extension: {str(e)}")
+    
+    def _process_protocol(self, node: MockNode) -> None:
+        """Process a protocol declaration.
+        
+        Args:
+            node: Protocol declaration node
+        """
+        try:
+            # Extract protocol name
+            name_node = next((child for child in node.children if child.type == 'identifier'), None)
+            if not name_node:
+                return
+                
+            name = name_node.text
+            
+            # Extract requirements
+            requirements = []
+            body = next((child for child in node.children if child.type == 'declaration_list'), None)
+            if body:
+                for child in body.children:
+                    if child.type == 'function_declaration':
+                        requirement = self._process_function(child)
+                        if requirement:
+                            requirements.append(requirement)
+            
+            # Add to protocols
+            self.protocols.append({
+                'name': name,
+                'requirements': requirements,
+                'start_line': node.start_point[0] + 1,
+                'end_line': node.end_point[0] + 1
+            })
+            
+        except Exception as e:
+            logger.error(f"Error processing protocol: {str(e)}")
+    
+    def _process_swiftui_view(self, node: MockNode) -> None:
+        """Process a SwiftUI view declaration.
+        
+        Args:
+            node: View declaration node
+        """
+        try:
+            # Extract view name
+            name_node = next((child for child in node.children if child.type == 'identifier'), None)
+            if not name_node:
+                return
+                
+            name = name_node.text
+            
+            # Extract body
+            body = next((child for child in node.children if child.type == 'declaration_list'), None)
+            if not body:
+                return
+                
+            # Extract properties
+            properties = []
+            for child in body.children:
+                if child.type == 'variable_declaration':
+                    property = self._process_variable(child)
+                    if property:
+                        properties.append(property)
+            
+            # Add to views
+            self.views.append({
+                'name': name,
+                'properties': properties,
+                'start_line': node.start_point[0] + 1,
+                'end_line': node.end_point[0] + 1
+            })
+            
+        except Exception as e:
+            logger.error(f"Error processing SwiftUI view: {str(e)}")
+    
+    def _process_property_wrapper(self, node: MockNode) -> None:
+        """Process a property wrapper.
+        
+        Args:
+            node: Property wrapper node
+        """
+        try:
+            # Extract wrapper name
+            name_node = next((child for child in node.children if child.type == 'identifier'), None)
+            if not name_node:
+                return
+                
+            name = name_node.text
+            
+            # Extract arguments
+            arguments = []
+            arg_list = next((child for child in node.children if child.type == 'argument_list'), None)
+            if arg_list:
+                for arg in arg_list.children:
+                    if arg.type == 'argument':
+                        arg_value = next((child.text for child in arg.children if child.type == 'string_literal'), None)
+                        if arg_value:
+                            arguments.append(arg_value)
+            
+            # Add to property wrappers
+            self.property_wrappers.append({
+                'name': name,
+                'arguments': arguments,
+                'start_line': node.start_point[0] + 1,
+                'end_line': node.end_point[0] + 1
+            })
+            
+        except Exception as e:
+            logger.error(f"Error processing property wrapper: {str(e)}")
+    
+    def _is_swiftui_view(self, node: MockNode) -> bool:
+        """Check if a struct is a SwiftUI view.
+        
+        Args:
+            node: Struct declaration node
+            
+        Returns:
+            True if the struct is a SwiftUI view
+        """
+        try:
+            # Check for View protocol conformance
+            inheritance_list = next((child for child in node.children if child.type == 'inheritance_list'), None)
+            if not inheritance_list:
+                return False
+                
+            return any(child.text == 'View' for child in inheritance_list.children if child.type == 'identifier')
+            
+        except Exception as e:
+            logger.error(f"Error checking SwiftUI view: {str(e)}")
+            return False
+
+    def _cleanup_temp_files(self, temp_dir: Path) -> None:
+        """Clean up temporary files created during grammar building.
+        
+        Args:
+            temp_dir: Path to the temporary directory to clean up.
+        """
+        try:
+            if temp_dir.exists():
+                for file in temp_dir.glob('**/*'):
+                    if file.is_file():
+                        file.unlink()
+                for dir in reversed(list(temp_dir.glob('**/*'))):
+                    if dir.is_dir():
+                        dir.rmdir()
+                temp_dir.rmdir()
+                logger.info(f"Cleaned up temporary files in {temp_dir}")
+        except Exception as e:
+            logger.error(f"Error cleaning up temporary files: {e}")
+
+    @property
+    def version(self) -> Optional[str]:
+        """Get the version of the Swift grammar.
+        
+        Returns:
+            str: Version string from package.json, or None if not available.
+        """
+        try:
+            if self.language:
+                vendor_path = Path(__file__).parent.parent.parent / 'vendor' / 'tree-sitter-swift'
+                package_json = vendor_path / 'package.json'
+                if package_json.exists():
+                    import json
+                    with open(package_json) as f:
+                        data = json.load(f)
+                        return data.get('version')
+            return None
+        except Exception as e:
+            logger.error(f"Error getting grammar version: {e}")
+            return None
+
+    def analyze(self, code: str) -> Dict[str, Any]:
+        """Analyze Swift code and return extracted information."""
+        try:
+            mock_tree = self.parse(code)
+            if not mock_tree:
+                return {'error': 'Failed to parse Swift code'}
+
+            return {
+                'imports': mock_tree.imports,
+                'exports': mock_tree.exports,
+                'functions': mock_tree.functions,
+                'classes': mock_tree.classes,
+                'variables': mock_tree.variables
+            }
+
+        except Exception as e:
+            logger.error(f"Error analyzing Swift code: {str(e)}")
+            return {'error': str(e)} 

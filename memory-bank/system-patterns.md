@@ -1589,4 +1589,16 @@ Common patterns for language integration:
 - Custom parsers
 - Feature adapters
 - Package managers
-- Build systems 
+- Build systems
+
+## SwiftUI-Specific Patterns
+- View hierarchy analysis
+- Property wrapper detection
+- State management
+- Environment values
+- Custom modifiers
+- Gesture handling
+- Animation sequences
+- Transition effects
+- Layout system
+- Preview providers 
