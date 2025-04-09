@@ -43,9 +43,16 @@ class JSONFormatter(logging.Formatter):
             'line': record.lineno
         }
         
-        # Add any extra fields from the record
+        # Add fields from the 'extra' dictionary if it exists
+        if hasattr(record, 'extra') and isinstance(record.extra, dict):
+            for key, value in record.extra.items():
+                if key not in data: # Avoid overwriting standard fields
+                    data[key] = value
+
+        # Add any other record attributes not already included and not private
+        # This is less reliable than using 'extra' but can catch other fields
         for key, value in record.__dict__.items():
-            if key not in data and not key.startswith('_'):
+            if key not in data and key not in ['args', 'asctime', 'created', 'exc_info', 'exc_text', 'filename', 'funcName', 'levelname', 'levelno', 'lineno', 'module', 'msecs', 'message', 'msg', 'name', 'pathname', 'process', 'processName', 'relativeCreated', 'stack_info', 'thread', 'threadName', 'extra'] and not key.startswith('_'):
                 data[key] = value
         
         # Add exception info if present
@@ -200,13 +207,17 @@ class StructuredLogger:
             level: Log level
             msg: Message to log
             *args: Format args
-            **kwargs: Additional fields
+            **kwargs: Additional fields for structured logging context
         """
         if args:
             msg = msg % args
             
-        extra = {'extra_fields': {**self.context, **kwargs}}
-        self.logger.log(level, msg, extra=extra)
+        # Combine context and kwargs for the extra dict
+        log_extra = {**self.context, **kwargs}
+        
+        # Pass the combined dict directly as the 'extra' argument
+        # This is the standard way to add custom data to log records
+        self.logger.log(level, msg, extra=log_extra)
         
     def debug(self, msg: str, *args: Any, **kwargs: Any) -> None:
         """Log debug message."""

@@ -25,16 +25,9 @@ pip install -r requirements.txt
 - Perf (<100ms API, <512MB RAM)
 - Scalability design
 
-## Current Technical Goals
-- TDD >90% coverage.
-- Security (Val, AuthN/Z).
-- Perf (<100ms API, <512MB RAM goal).
-- Scalability design.
-*See `project-brief.md` & `product-context.md` for more details.*
-
-## Future Considerations
+## Future
 - K8s Integration
 - Cloud Deployment
 - More LLM Integrations
-- Advanced Security (e.g., WAF)
-- Enhanced Monitoring (Dashboards/Alerts)
+- Enhanced Security
+- Advanced Monitoring

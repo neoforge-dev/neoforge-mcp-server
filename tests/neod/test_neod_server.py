@@ -4,12 +4,14 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 import logging
+import time
 
 # Assuming config structure is similar to BaseServer test
 from server.utils.config import ServerConfig
 
 # Import the class to test
 from server.neod.server import NeoDevServer
+from server.utils.security import ApiKey
 
 # --- Fixtures ---
 
@@ -34,22 +36,43 @@ def test_neod_server(mock_neod_config):
     with patch('server.utils.config.ConfigManager.load_config') as MockLoadConfig, \
          patch('server.utils.base_server.LogManager') as MockLogManager, \
          patch('server.utils.base_server.MonitoringManager') as MockMonitoringManager, \
-         patch('server.utils.base_server.SecurityManager') as MockSecurity:
-         # No need to patch NeoDev specific managers yet (e.g., WorkspaceManager)
+         patch('server.utils.base_server.SecurityManager') as MockSecurity, \
+         patch('server.utils.error_handling.logger') as MockErrorHandlingLogger:
 
         # Configure mocks
         MockLoadConfig.return_value = mock_neod_config
+
+        # Mock logger passed to middleware
         mock_logger_instance = MagicMock(spec=logging.Logger)
+        mock_logger_instance.bind = MagicMock(return_value=mock_logger_instance)
         MockLogManager.return_value.get_logger.return_value = mock_logger_instance
+
+        # Mock logger used by @handle_exceptions decorator
+        MockErrorHandlingLogger.bind = MagicMock(return_value=MockErrorHandlingLogger)
+
+        # MockMonitoringManager
         MockMonitoringManager.return_value = None
+
+        # Mock SecurityManager
         mock_security_instance = MagicMock()
+        # Add basic mock ApiKey for dependency injection
+        mock_api_key_obj = ApiKey(
+            key_id="neod-test-id",
+            key_hash="neod-test-hash",
+            name="neod-test-key",
+            created_at=time.time(),
+            scopes=set(["neod:*", "code_understanding:*"]) # Example scopes
+        )
+        mock_security_instance.validate_api_key.return_value = mock_api_key_obj
+        mock_security_instance.check_permission.return_value = True # Default to True
         MockSecurity.return_value = mock_security_instance
 
         # Instantiate the server
         server = NeoDevServer()
 
-        # Verify mocks were called as expected during BaseServer init
-        MockLoadConfig.assert_called_once_with("neod_server")
+        # Verify mocks were called as expected during init
+        # Use keyword argument for assertion
+        MockLoadConfig.assert_called_once_with(server_name="neod_server")
         MockLogManager.assert_called_once()
         MockSecurity.assert_called_once()
 
@@ -61,11 +84,10 @@ def test_neod_server(mock_neod_config):
             "LoadConfig": MockLoadConfig,
             "LogManager": MockLogManager,
             "MonitoringManager": MockMonitoringManager,
-            "SecurityManager": MockSecurity
+            "SecurityManager": MockSecurity,
+            "ErrorHandlingLogger": MockErrorHandlingLogger
         }
         yield server
-
-        # Optional: Add mock resets here if needed later
 
 @pytest.fixture
 def client(test_neod_server):

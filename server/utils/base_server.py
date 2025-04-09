@@ -15,7 +15,10 @@ from .config import ConfigManager, ServerConfig
 from .logging import LogManager
 from .monitoring import MonitoringManager
 from .security import SecurityManager, ApiKey
-from .error_handling import handle_exceptions, MCPError
+from .error_handling import (
+    MCPError, ValidationError, AuthenticationError, AuthorizationError,
+    NotFoundError, ConflictError, ErrorHandlerMiddleware, handle_exceptions
+)
 
 # API key header
 api_key_header = APIKeyHeader(name="X-API-Key")
@@ -135,44 +138,44 @@ class BaseServer:
         self.register_routes()
         
     def _init_managers(self, app_name: str) -> None:
-        """Initialize server managers.
+        """Initialize server managers."""
+        # Load config
+        config_manager = ConfigManager()  # Instantiate ConfigManager
+        self.config = config_manager.load_config(server_name=app_name)
         
-        Args:
-            app_name: Name of the application
-        """
-        # Initialize config
-        self.config_manager = ConfigManager()
-        self.config: ServerConfig = self.config_manager.load_config(app_name)
-        
-        # Initialize logger
-        self.log_manager = LogManager(
-            app_name,
-            log_dir=self.config.log_file,
-            log_level=self.config.log_level
-        )
-        self.logger = self.log_manager.get_logger()
+        # Initialize logging
+        self.logger = LogManager(
+            name=app_name,
+            log_level=self.config.log_level,
+            log_dir=self.config.log_file
+        ).get_logger()
         
         # Initialize monitoring if enabled
-        if self.config.enable_metrics or self.config.enable_tracing:
+        if self.config.enable_metrics:
             self.monitor = MonitoringManager(
-                service_name=app_name,
-                service_version=self.config.version,
-                tracing_endpoint=self.config.tracing_endpoint if self.config.enable_tracing else None,
-                enable_tracing=self.config.enable_tracing,
-                enable_metrics=self.config.enable_metrics
+                app_name=app_name,
+                metrics_port=self.config.metrics_port,
+                enable_tracing=self.config.enable_tracing
             )
         else:
             self.monitor = None
             
         # Initialize security
         self.security = SecurityManager(
-            secret_key=self.config.auth_token,
-            config_api_keys=self.config.api_keys
+            api_keys=self.config.api_keys,
+            enable_auth=self.config.enable_auth,
+            auth_token=self.config.auth_token
         )
         
     def _setup_middleware(self) -> None:
         """Setup server middleware."""
-        # Add CORS middleware
+        # Add error handling middleware
+        self.app.add_middleware(
+            ErrorHandlerMiddleware,
+            logger=self.logger
+        )
+        
+        # Add CORS middleware if origins are configured
         if self.config.allowed_origins:
             self.app.add_middleware(
                 CORSMiddleware,
@@ -182,47 +185,33 @@ class BaseServer:
                 allow_headers=["*"]
             )
             
-        # Add compression middleware if enabled
+        # Add GZip compression if enabled
         if self.config.enable_compression:
             self.app.add_middleware(
                 GZipMiddleware,
-                minimum_size=1000,
-                compresslevel=self.config.compression_level
+                minimum_size=1000
             )
             
-        # Add trusted host middleware if proxy settings configured
-        if self.config.enable_proxy and self.config.trusted_proxies:
+        # Add trusted host middleware
+        if self.config.trusted_proxies:
             self.app.add_middleware(
                 TrustedHostMiddleware,
                 allowed_hosts=self.config.trusted_proxies
             )
             
-        # Add session middleware if auth enabled
-        if self.config.enable_auth:
+        # Add session middleware if enabled
+        if self.config.enable_sessions:
             self.app.add_middleware(
                 SessionMiddleware,
-                secret_key=self.config.auth_token or str(uuid.uuid4())
+                secret_key=self.config.session_secret,
+                session_cookie="session",
+                max_age=3600
             )
-            
-        # Add request logging middleware
-        self.app.add_middleware(RequestLoggingMiddleware)
-        
-        # Add rate limiting middleware
-        if self.config.enable_rate_limiting:
-            self.app.add_middleware(RateLimitingMiddleware)
             
         # Add state middleware
         @self.app.middleware("http")
         async def add_state(request: Request, call_next):
-            """Add state to request.
-            
-            Args:
-                request: The incoming request
-                call_next: The next middleware in the chain
-                
-            Returns:
-                The response
-            """
+            """Add state to request."""
             # Add state
             request.state.log_manager = self.logger
             request.state.security_manager = self.security
@@ -271,14 +260,14 @@ class BaseServer:
             ApiKey object
             
         Raises:
-            HTTPException if key is invalid
+            AuthenticationError if key is invalid
         """
         try:
             return self.security.validate_api_key(api_key)
         except MCPError as e:
-            raise HTTPException(
-                status_code=401,
-                detail=str(e)
+            raise AuthenticationError(
+                message=str(e),
+                details={"api_key": api_key}
             )
             
     def get_app(self) -> FastAPI:

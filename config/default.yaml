@@ -16,7 +16,7 @@ check_resources: true
 do_token: "test_do_token_from_config" # Placeholder for tests
 api_keys:
   test-api-key: # Description: API Key for testing purposes
-    permissions:
+    scopes:
       - "*:*"
 
 # DigitalOcean settings

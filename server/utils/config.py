@@ -65,6 +65,9 @@ class ServerConfig:
         enable_auth: bool = False,
         auth_token: Optional[str] = None,
         allowed_origins: List[str] = None,
+        # Session settings (Added)
+        enable_sessions: bool = False,
+        session_secret: Optional[str] = None,
         # Monitoring settings
         enable_metrics: bool = True,
         metrics_port: int = 9090,
@@ -199,6 +202,10 @@ class ServerConfig:
         self.auth_token = auth_token
         self.allowed_origins = allowed_origins or []
         
+        # Session settings (Added)
+        self.enable_sessions = enable_sessions
+        self.session_secret = session_secret
+
         # Monitoring settings
         self.enable_metrics = enable_metrics
         self.metrics_port = metrics_port

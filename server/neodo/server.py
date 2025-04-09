@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from ..utils.base_server import BaseServer
-from ..utils.error_handling import handle_exceptions, MCPError
+from ..utils.error_handling import handle_exceptions, MCPError, AuthorizationError, ValidationError
 from ..utils.security import ApiKey
 
 # API key header
@@ -167,16 +167,14 @@ class NeoDOServer(BaseServer):
             """
             # Check permissions
             if not self.security.check_permission(api_key, "manage:resources"):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Insufficient permissions"
-                )
+                raise AuthorizationError(message="Insufficient permissions")
                 
             # Check if DO management is enabled
             if not self.config.enable_do_management:
-                raise HTTPException(
+                raise MCPError(
                     status_code=503,
-                    detail="DO management is disabled"
+                    error_code="SERVICE_DISABLED",
+                    message="DO management is disabled"
                 )
                 
             # Manage resources
@@ -189,37 +187,38 @@ class NeoDOServer(BaseServer):
                 }
             ):
                 try:
+                    if not self.do_manager:
+                        raise MCPError(status_code=503, error_code="DO_CLIENT_UNAVAILABLE", message="DigitalOcean client not initialized")
+
                     if request_body.resource_type == "droplet":
                         droplet = self.do_manager.get_droplet(request_body.resource_id)
-                        
-                        # Convert int to string for logging/response if needed
-                        str_resource_id = str(request_body.resource_id)
-                        if request_body.action == "power_on":
-                            droplet.power_on()
-                        elif request_body.action == "power_off":
-                            droplet.power_off()
-                        elif request_body.action == "reboot":
-                            droplet.reboot()
-                        elif request_body.action == "shutdown":
-                            droplet.shutdown()
+                        action = getattr(droplet, request_body.action, None)
+                        if action and callable(action):
+                            action()
                         else:
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"Unsupported action for droplets: {request_body.action}"
+                            raise ValidationError(
+                                message=f"Invalid action: {request_body.action}",
+                                details={"action": request_body.action, "resource_type": "droplet"}
                             )
-                            
-                        return {
-                            "status": "success",
-                            "action": request_body.action,
-                            "resource_type": request_body.resource_type,
-                            "resource_id": str_resource_id
-                        }
                     else:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Unsupported resource type: {request_body.resource_type}"
+                        raise ValidationError(
+                            message=f"Unsupported resource type: {request_body.resource_type}",
+                            details={"resource_type": request_body.resource_type}
                         )
                     
+                    return {"status": "success", "message": f"Action '{request_body.action}' completed successfully."}
+                    
+                except digitalocean.Error as e:
+                    self.logger.error(
+                        "DigitalOcean API error during management",
+                        extra={
+                            "error": str(e),
+                            "resource_type": request_body.resource_type,
+                            "resource_id": str(request_body.resource_id),
+                            "action": request_body.action
+                        }
+                    )
+                    raise MCPError(message=str(e), status_code=500, error_code="DO_API_ERROR")
                 except Exception as e:
                     self.logger.error(
                         "Resource management failed",
@@ -227,13 +226,10 @@ class NeoDOServer(BaseServer):
                             "error": str(e),
                             "action": request_body.action,
                             "resource_type": request_body.resource_type,
-                            "resource_id": str_resource_id
+                            "resource_id": str(request_body.resource_id)
                         }
                     )
-                    raise HTTPException(
-                        status_code=500,
-                        detail=str(e)
-                    )
+                    raise MCPError(message=str(e), status_code=500, error_code="DO_MANAGEMENT_FAILED")
                     
         @self.app.get("/api/v1/do/monitoring")
         @handle_exceptions()
@@ -314,16 +310,14 @@ class NeoDOServer(BaseServer):
             """
             # Check permissions
             if not self.security.check_permission(api_key, "backup:resources"):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Insufficient permissions"
-                )
+                raise AuthorizationError(message="Insufficient permissions")
                 
             # Check if DO backup is enabled
             if not self.config.enable_do_backup:
-                raise HTTPException(
+                raise MCPError(
                     status_code=503,
-                    detail="DO backup is disabled"
+                    error_code="SERVICE_DISABLED",
+                    message="DO backup is disabled"
                 )
                 
             # Backup resources
@@ -336,6 +330,9 @@ class NeoDOServer(BaseServer):
                 }
             ):
                 try:
+                    if not self.do_manager:
+                        raise MCPError(status_code=503, error_code="DO_CLIENT_UNAVAILABLE", message="DigitalOcean client not initialized")
+
                     if request_body.resource_type == "droplet":
                         droplet = self.do_manager.get_droplet(request_body.resource_id)
                         snapshot = droplet.take_snapshot(name=request_body.backup_name, power_off=False)
@@ -348,11 +345,22 @@ class NeoDOServer(BaseServer):
                             "resource_id": str(request_body.resource_id)
                         }
                     else:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Unsupported resource type: {request_body.resource_type}"
+                        raise ValidationError(
+                            message=f"Unsupported resource type for backup: {request_body.resource_type}",
+                            details={"resource_type": request_body.resource_type}
                         )
                     
+                except digitalocean.Error as e:
+                    self.logger.error(
+                        "DigitalOcean API error during backup",
+                        extra={
+                            "error": str(e),
+                            "resource_type": request_body.resource_type,
+                            "resource_id": str(request_body.resource_id),
+                            "backup_name": request_body.backup_name
+                        }
+                    )
+                    raise MCPError(message=str(e), status_code=500, error_code="DO_API_ERROR")
                 except Exception as e:
                     self.logger.error(
                         "Resource backup failed",
@@ -363,10 +371,7 @@ class NeoDOServer(BaseServer):
                             "backup_name": request_body.backup_name
                         }
                     )
-                    raise HTTPException(
-                        status_code=500,
-                        detail=str(e)
-                    )
+                    raise MCPError(message=str(e), status_code=500, error_code="DO_BACKUP_FAILED")
                     
         @self.app.post("/api/v1/do/restore")
         @handle_exceptions()

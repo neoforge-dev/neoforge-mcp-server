@@ -83,9 +83,15 @@ class NeoLocalLLMServer(BaseServer):
                 self.logger.info("Local LLM initialized successfully")
         except Exception as e:
             self.logger.error(
-                f"Failed to initialize LLM: {str(e)}",
-                model_path=model_path
+                f"Failed to load LLM model from path: {model_path}",
+                exc_info=True,
+                extra={
+                    "model_path": model_path,
+                    "error": str(e)
+                }
             )
+            self.model = None
+            self.tokenizer = None
             # Don't raise here, allow the server to start without LLM
             # Endpoints will handle the error case
             

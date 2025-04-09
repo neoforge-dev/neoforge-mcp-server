@@ -298,7 +298,7 @@ class CommandExecutor:
                         current_status = info.get("status", "unknown") # Get tracked status
                         # Update status if process finished but wasn't cleaned up yet
                         if not is_running and current_status == "running":
-                             current_status = "finished" # Or derive from poll() if needed
+                            current_status = "finished" # Or derive from poll() if needed
                         
                         processes.append({
                             "pid": pid,
@@ -316,8 +316,8 @@ class CommandExecutor:
                 "processes": processes
             }
         except Exception as e:
-             print(f"Error during list_processes: {e}")
-             return {"status": "error", "error": f"Failed to list processes: {e}", "error_code": "LIST_ERROR"}
+            print(f"Error during list_processes: {e}")
+            return {"status": "error", "error": f"Failed to list processes: {e}", "error_code": "LIST_ERROR"}
 
     # --- New method for true background execution ---
     def start_background(

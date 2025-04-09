@@ -7,27 +7,90 @@ from functools import wraps
 import traceback
 import logging
 import asyncio
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+import uuid
+from datetime import datetime
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 class MCPError(Exception):
-    """Base exception class for MCP errors."""
-    def __init__(self, message: str, error_code: str = "MCP_ERROR", details: Optional[Dict[str, Any]] = None):
+    """Base exception for MCP errors."""
+    
+    def __init__(
+        self,
+        message: str,
+        status_code: int = 500,
+        error_code: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None
+    ):
         self.message = message
-        self.error_code = error_code
+        self.status_code = status_code
+        self.error_code = error_code or "INTERNAL_ERROR"
         self.details = details or {}
         super().__init__(message)
 
 class ValidationError(MCPError):
-    """Raised when input validation fails."""
+    """Validation error."""
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, "VALIDATION_ERROR", details)
+        super().__init__(
+            message=message,
+            status_code=400,
+            error_code="VALIDATION_ERROR",
+            details=details
+        )
+
+class AuthenticationError(MCPError):
+    """Authentication error."""
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(
+            message=message,
+            status_code=401,
+            error_code="AUTHENTICATION_ERROR",
+            details=details
+        )
+
+class AuthorizationError(MCPError):
+    """Authorization error."""
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(
+            message=message,
+            status_code=403,
+            error_code="AUTHORIZATION_ERROR",
+            details=details
+        )
+
+class NotFoundError(MCPError):
+    """Resource not found error."""
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(
+            message=message,
+            status_code=404,
+            error_code="NOT_FOUND",
+            details=details
+        )
+
+class ConflictError(MCPError):
+    """Resource conflict error."""
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(
+            message=message,
+            status_code=409,
+            error_code="CONFLICT",
+            details=details
+        )
 
 class SecurityError(MCPError):
-    """Raised when a security check fails."""
+    """Security violation error."""
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, "SECURITY_ERROR", details)
+        super().__init__(
+            message=message,
+            status_code=403, # Forbidden
+            error_code="SECURITY_VIOLATION",
+            details=details
+        )
 
 class ResourceError(MCPError):
     """Raised when there's an issue with system resources."""
@@ -55,25 +118,40 @@ def format_error_response(error: Union[Exception, str], error_code: str = "UNKNO
             "error": str(error)
         }
 
-def handle_exceptions(error_code: str = "TOOL_ERROR", log_traceback: bool = True) -> Any:
-    """Decorator to handle exceptions in tool functions."""
+def handle_exceptions(error_code: str = "INTERNAL_ERROR", log_traceback: bool = True):
+    """Decorator for handling exceptions in route handlers or other functions."""
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
+            request_id = getattr(args[0].state, 'request_id', 'N/A') if args and hasattr(args[0], 'state') else 'N/A'
+            bound_logger = logger.bind(request_id=request_id, function_name=func.__name__)
             try:
                 # Await the result if the original function is async
                 if asyncio.iscoroutinefunction(func):
-                    return await func(*args, **kwargs)
+                    result = await func(*args, **kwargs)
                 else:
-                    return func(*args, **kwargs)
+                    result = func(*args, **kwargs)
+                return result
             except MCPError as e:
                 if log_traceback:
-                    logger.error(f"Tool error in {func.__name__}: {str(e)}\n{traceback.format_exc()}")
-                return format_error_response(e)
+                    bound_logger.error(
+                        f"MCPError in {func.__name__}",
+                        error_code=e.error_code,
+                        status_code=e.status_code,
+                        details=e.details,
+                        exc_info=e
+                    )
+                # Re-raise MCPError for the middleware to handle and format
+                raise e
             except Exception as e:
                 if log_traceback:
-                    logger.error(f"Unexpected error in {func.__name__}: {str(e)}\n{traceback.format_exc()}")
-                return format_error_response(e, error_code)
+                    bound_logger.exception(f"Unexpected error in {func.__name__}")
+                # Wrap unexpected errors in MCPError for consistent handling
+                raise MCPError(
+                    message=f"An unexpected error occurred: {str(e)}",
+                    status_code=500,
+                    error_code=error_code # Use the provided error code
+                ) from e
         return wrapper
     return decorator
 
@@ -124,4 +202,68 @@ def check_resource_limits(
         raise ResourceError(
             f"Disk usage too high: {current_disk}%",
             {"current": current_disk, "limit": disk_percent}
-        ) 
+        )
+
+class ErrorHandlerMiddleware(BaseHTTPMiddleware):
+    """Middleware for handling errors and adding request context."""
+    
+    def __init__(self, app, logger: logging.Logger):
+        super().__init__(app)
+        self.logger = logger
+        
+    async def dispatch(self, request: Request, call_next):
+        """Process request and handle errors."""
+        # Generate request ID
+        request_id = str(uuid.uuid4())
+        request.state.request_id = request_id
+        
+        # Add request context to logger
+        self.logger = self.logger.bind(
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            client_ip=request.client.host if request.client else None
+        )
+        
+        try:
+            # Process request
+            response = await call_next(request)
+            return response
+            
+        except MCPError as e:
+            # Handle known MCP errors
+            self.logger.error(
+                "MCP error occurred",
+                error_code=e.error_code,
+                status_code=e.status_code,
+                details=e.details
+            )
+            
+            return JSONResponse(
+                status_code=e.status_code,
+                content={
+                    "error": {
+                        "code": e.error_code,
+                        "message": e.message,
+                        "details": e.details,
+                        "request_id": request_id,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                }
+            )
+            
+        except Exception as e:
+            # Handle unexpected errors
+            self.logger.exception("Unexpected error occurred")
+            
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": {
+                        "code": "INTERNAL_ERROR",
+                        "message": "An unexpected error occurred",
+                        "request_id": request_id,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                }
+            ) 

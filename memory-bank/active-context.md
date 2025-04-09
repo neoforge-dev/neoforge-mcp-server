@@ -1,32 +1,31 @@
-# Active Context - MCP Refactor
+# Active Context
 
 ## Current Focus
-- Phase 2: BaseServer Migration & Test Coverage (>90% target)
+- Phase 2: BaseServer Migration & Test Coverage
 - Fixing 3 failing tests:
-  1. test_list_sessions (status missing in list_processes)
+  1. test_list_sessions (status missing)
   2. test_async_await_support
   3. test_export_variants
 
 ## Recent Changes
 - All servers migrated to BaseServer
 - Basic health tests passing
-- Fixed NeoDO test mocking/validation
-- Enhanced JS parser (exports, variables)
+- Enhanced JS parser
 
 ## Next Steps
-1. Fix test_list_sessions (add status)
-2. Address JS parser test failures
-3. Increase test coverage (>90%)
-
-## Active Decisions
-- Using Pydantic for NeoDO validation
-- Centralized NeoDO mocking
-- JS parser fixes implemented
+1. Fix test_list_sessions
+2. Address JS parser tests
+3. Increase test coverage
 
 ## Status
 - BaseServer: Done
 - Server Migration: 4/7 Complete
 - Test Coverage: ~9% (Target: >90%)
+
+## Active Decisions
+- Pydantic for NeoDO validation
+- Centralized NeoDO mocking
+- JS parser fixes implemented
 
 # --- Active Context ---
 # Status: All servers migrated. Basic tests passing for all servers.

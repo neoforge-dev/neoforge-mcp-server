@@ -15,10 +15,10 @@
    - Target: >90%
 
 3. Next Steps
-   - Implement real endpoints
+   - Implement endpoints
    - Add integration tests
-   - Implement security (JWT, RBAC)
+   - Implement security
 
 ## Risks
 - Low test coverage (~11%)
-- JS parser limitations (2 tests affected)
+- JS parser limitations

@@ -6,25 +6,24 @@
 - Security-First
 
 ## BaseServer Pattern
-- Standardizes setup (Config, Log, Monitor, Security)
-- Provides: /health, utils, middleware (CORS, Logging, Errors, Security, Monitor)
+- Standardizes setup (Config, Log, Monitor)
+- Provides: /health, utils, middleware
 
 ## Design Patterns
 - Registry: Tool/model mgmt
-- Factory/Strategy: Tool creation/execution
-- Adapter: External tool integration
-- Decorator: Cross-cutting concerns
-- Command: Operation encapsulation
+- Factory/Strategy: Tool creation
+- Adapter: External tools
+- Decorator: Cross-cutting
+- Command: Operations
 
 ## Monitoring
-- OpenTelemetry SDK (Metrics/Prometheus, Tracing/OTLP)
-- Structured JSON Logging
+- OpenTelemetry (Metrics/Tracing)
+- JSON Logging
 
 ## Server Structure
 ```python
 class SpecificServer(BaseServer):
     def _setup_routes(self):
-        # Server-specific routes
         pass
 ```
 

@@ -10,7 +10,9 @@ import secrets
 from typing import Any, Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict
-from .error_handling import SecurityError
+from .error_handling import SecurityError, AuthenticationError, AuthorizationError
+import logging
+from fastapi import HTTPException
 
 @dataclass
 class ApiKey:
@@ -99,31 +101,34 @@ class SecurityManager:
     
     def __init__(
         self,
-        secret_key: Optional[str] = None,
-        config_api_keys: Optional[Dict[str, Any]] = None,
-        key_length: int = 32,
-        hash_iterations: int = 100000,
-        rate_limit: int = 100,
-        rate_limit_window: int = 60
+        api_keys: Dict[str, Dict[str, Any]],
+        enable_auth: bool = True,
+        auth_token: Optional[str] = None
     ):
         """Initialize security manager.
         
         Args:
-            secret_key: Secret key for signing
-            config_api_keys: API keys loaded from configuration files
-            key_length: Length of generated keys
-            hash_iterations: Number of hash iterations
-            rate_limit: Maximum requests per window
-            rate_limit_window: Time window in seconds
+            api_keys: Dictionary of API keys and their permissions
+            enable_auth: Whether to enable authentication
+            auth_token: Optional auth token for server-to-server communication
         """
-        self.secret_key = secret_key or os.urandom(32)
-        self.key_length = key_length
-        self.hash_iterations = hash_iterations
-        self.config_api_keys = config_api_keys or {}
+        self.enable_auth = enable_auth
+        self.auth_token = auth_token
+        self.logger = logging.getLogger(__name__)
         
-        # Store API keys
+        # Initialize API keys
         self.api_keys: Dict[str, ApiKey] = {}
-        
+        for key, info in api_keys.items():
+            self.api_keys[key] = ApiKey(
+                key_id=key,
+                key_hash=hashlib.sha256(key.encode()).hexdigest(),
+                name=key,
+                created_at=info.get("created_at", time.time()),
+                expires_at=info.get("expires_at"),
+                roles=set(info.get("roles", [])),
+                scopes=set(info.get("scopes", []))
+            )
+            
         # Role definitions
         self.roles: Dict[str, Set[str]] = {
             'admin': {'*'},  # Admin has all permissions
@@ -134,7 +139,7 @@ class SecurityManager:
         }
         
         # Initialize rate limiter
-        self.rate_limiter = RateLimiter(rate_limit, rate_limit_window)
+        self.rate_limiter = RateLimiter(100, 60)
         
         # Start cleanup thread
         self._start_cleanup_thread()
@@ -169,14 +174,14 @@ class SecurityManager:
             Tuple of (key, hash)
         """
         # Generate random key
-        key = secrets.token_urlsafe(self.key_length)
+        key = secrets.token_urlsafe(32)
         
         # Hash key
         key_hash = hashlib.pbkdf2_hmac(
             'sha256',
             key.encode(),
-            self.secret_key,
-            self.hash_iterations
+            os.urandom(32),
+            100000
         ).hex()
         
         return key, key_hash
@@ -219,113 +224,72 @@ class SecurityManager:
         
         return key, api_key
         
-    def validate_api_key(self, key: str) -> ApiKey:
-        """Validate API key against internal and config keys.
+    def validate_api_key(self, api_key: str) -> ApiKey:
+        """Validate an API key.
         
         Args:
-            key: API key to validate
+            api_key: The API key to validate
             
         Returns:
-            ApiKey if valid
+            ApiKey object if valid
             
         Raises:
-            SecurityError if invalid
+            AuthenticationError if key is invalid
         """
-        # 1. Try validating against internally generated/hashed keys
-        try:
-            # Hash key
-            key_hash = hashlib.pbkdf2_hmac(
-                'sha256',
-                key.encode(),
-                self.secret_key,
-                self.hash_iterations
-            ).hex()
+        if not self.enable_auth:
+            return ApiKey(key="anonymous", roles=set(), scopes=set("*:*"[:-1]))
             
-            # Get key ID
-            key_id = hashlib.sha256(key_hash.encode()).hexdigest()[:8]
+        if not api_key:
+            raise AuthenticationError(
+                message="API key is required",
+                details={"error": "missing_api_key"}
+            )
             
-            # Look up key in internal store
-            api_key = self.api_keys.get(key_id)
-            if not api_key:
-                 # Key not found in internal store, will proceed to check config keys
-                 raise SecurityError("Key not found in internal store", details={"key_id": key_id})
-
-            # Check hash match
-            if not hmac.compare_digest(api_key.key_hash, key_hash):
-                 raise SecurityError("Invalid API key hash", details={"key_id": key_id})
-                 
-            # Check expiration
-            if api_key.is_expired():
-                 raise SecurityError("API key expired", details={"key_id": key_id})
-                 
-            return api_key # Valid internal key found
-
-        except SecurityError as internal_error:
-            # 2. If not found/invalid in internal store, check config keys
-            if key in self.config_api_keys:
-                config_key_data = self.config_api_keys[key]
-                if isinstance(config_key_data, dict):
-                    permissions = config_key_data.get('permissions', [])
-                    # Assuming permissions in config are equivalent to scopes for now
-                    # Create a temporary ApiKey object for this request
-                    # Note: No proper hash or expiration check possible here
-                    return ApiKey(
-                        key_id=key, # Use the key itself as ID
-                        key_hash="config_key", # Placeholder hash
-                        name=f"Config Key: {key}",
-                        created_at=time.time(),
-                        scopes=set(permissions)
-                    )
-                else:
-                     # Handle cases where the config value isn't a dictionary (unexpected)
-                     pass # Or log a warning
-
-            # If key not found in internal keys OR config keys, raise error
-            # Raise the original internal error if it occurred, otherwise a generic invalid key error
-            # raise internal_error # Option 1: Re-raise original
-            raise SecurityError(f"Invalid API key: {key}") # Option 2: Generic error
+        # Check if key exists
+        if api_key not in self.api_keys:
+            raise AuthenticationError(
+                message="Invalid API key",
+                details={"error": "invalid_api_key"}
+            )
             
-    def check_permission(
-        self,
-        api_key: ApiKey,
-        required_scope: str
-    ) -> bool:
-        """Check if API key has required permission.
+        key_info = self.api_keys[api_key]
+        
+        # Check if key is expired
+        if key_info.expires_at and time.time() > key_info.expires_at:
+            raise AuthenticationError(
+                message="API key has expired",
+                details={"error": "expired_api_key"}
+            )
+            
+        return key_info
+        
+    def check_permission(self, api_key: ApiKey, permission: str) -> bool:
+        """Check if an API key has a specific permission.
         
         Args:
-            api_key: API key to check
-            required_scope: Required permission scope
+            api_key: The API key to check
+            permission: The permission to check for
             
         Returns:
-            True if permitted
+            True if the key has the permission, False otherwise
         """
-        # Check for universal scope first
-        if api_key.has_scope("*:*") or api_key.has_scope("*"):
-             return True
-             
-        # Check direct scope
-        if api_key.has_scope(required_scope):
+        # Anonymous access
+        if not self.enable_auth:
             return True
             
-        # Check wildcard scopes
-        parts = required_scope.split(':')
-        for i in range(len(parts)):
-            wildcard = ':'.join(parts[:i] + ['*'])
-            if api_key.has_scope(wildcard):
-                return True
-                
-        # Check role permissions
-        for role in api_key.roles:
-            role_scopes = self.roles.get(role, set())
-            if '*' in role_scopes:
-                return True
-            if required_scope in role_scopes:
-                return True
-            # Check role wildcard scopes
-            for scope in role_scopes:
-                if scope.endswith('*') and required_scope.startswith(scope[:-1]):
-                    return True
-                    
+        # Check for wildcard permission
+        if "*:*" in api_key.scopes:
+            return True
+            
+        # Check for specific permission
+        if permission in api_key.scopes:
+            return True
+            
+        # Check for wildcard namespace
+        namespace = permission.split(":")[0]
+        if f"{namespace}:*" in api_key.scopes:
+            return True
+            
         return False
         
     def require_scope(self, required_scope: str):
@@ -351,13 +315,14 @@ class SecurityManager:
             return wrapper
         return decorator
         
-    def revoke_api_key(self, key_id: str) -> None:
-        """Revoke API key.
+    def revoke_api_key(self, api_key: str) -> None:
+        """Revoke an API key.
         
         Args:
-            key_id: ID of key to revoke
+            api_key: The API key to revoke
         """
-        self.api_keys.pop(key_id, None)
+        if api_key in self.api_keys:
+            del self.api_keys[api_key]
         
     def list_api_keys(self) -> List[Dict[str, Any]]:
         """List all API keys.
@@ -405,6 +370,31 @@ class SecurityManager:
             role: list(scopes)
             for role, scopes in self.roles.items()
         }
+        
+    def validate_auth_token(self, token: str) -> bool:
+        """Validate an auth token.
+        
+        Args:
+            token: The token to validate
+            
+        Returns:
+            True if token is valid, False otherwise
+        """
+        if not self.enable_auth or not self.auth_token:
+            return True
+            
+        return hmac.compare_digest(token, self.auth_token)
+        
+    def get_api_key_info(self, api_key: str) -> Optional[ApiKey]:
+        """Get information about an API key.
+        
+        Args:
+            api_key: The API key to get info for
+            
+        Returns:
+            ApiKey object if key exists, None otherwise
+        """
+        return self.api_keys.get(api_key)
 
 # --- Command Security --- 
 

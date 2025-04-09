@@ -34,13 +34,20 @@ def test_neoo_server(mock_neoo_config):
     with patch('server.utils.config.ConfigManager.load_config') as MockLoadConfig, \
          patch('server.utils.base_server.LogManager') as MockLogManager, \
          patch('server.utils.base_server.MonitoringManager') as MockMonitoringManager, \
-         patch('server.utils.base_server.SecurityManager') as MockSecurity:
+         patch('server.utils.base_server.SecurityManager') as MockSecurity, \
+         patch('server.utils.error_handling.logger') as MockDecoratorLogger:
          # No need to patch NeoOps specific managers yet
 
         # Configure mocks
         MockLoadConfig.return_value = mock_neoo_config
-        mock_logger_instance = MagicMock(spec=logging.Logger)
+        mock_logger_instance = MagicMock() # Use a general MagicMock
+        # Explicitly add the 'bind' method and make it return the mock instance
+        mock_logger_instance.bind = MagicMock(return_value=mock_logger_instance)
         MockLogManager.return_value.get_logger.return_value = mock_logger_instance
+
+        # Mock logger used by the decorator (needs bind method too)
+        MockDecoratorLogger.bind.return_value = MockDecoratorLogger
+
         MockMonitoringManager.return_value = None
         mock_security_instance = MagicMock()
         MockSecurity.return_value = mock_security_instance
@@ -48,14 +55,15 @@ def test_neoo_server(mock_neoo_config):
         # Instantiate the server
         server = NeoOpsServer()
 
-        # Verify mocks were called as expected during BaseServer init
-        MockLoadConfig.assert_called_once_with("neoo_server")
+        # Verify mocks were called as expected during init
+        MockLoadConfig.assert_called_once_with(server_name="neoo_server")
         MockLogManager.assert_called_once()
         MockSecurity.assert_called_once()
 
         # Add mocks to instance for potential use in tests
         server._test_mocks = {
             "logger": mock_logger_instance,
+            "decorator_logger": MockDecoratorLogger,
             "monitor": None,
             "security": mock_security_instance,
             "LoadConfig": MockLoadConfig,
