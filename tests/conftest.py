@@ -11,13 +11,15 @@ import threading
 import time
 import asyncio
 from fastapi.testclient import TestClient
-from server.core.server import app as core_app
+from server.core import create_app as create_core_app
 from server.llm import create_app as create_llm_app
 from server.neod import create_app as create_neod_app
 from server.neoo import create_app as create_neoo_app
 from server.neolocal import create_app as create_neolocal_app
 from server.neollm.server import app as neollm_app
-from server.neodo.server import app as neodo_app
+from server.neodo import create_app as create_neodo_app
+from server.utils.config import ConfigManager
+from unittest.mock import patch, MagicMock
 
 # Add the parent directory to path to import the server module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -94,9 +96,10 @@ def event_loop():
 
 
 @pytest.fixture(scope="session")
-def core_client():
+def core_client() -> TestClient:
     """Create a test client for the Core MCP Server."""
-    return TestClient(core_app)
+    app = create_core_app()
+    return TestClient(app)
 
 
 @pytest.fixture(scope="session")
@@ -134,9 +137,61 @@ def neollm_client():
 
 
 @pytest.fixture(scope="session")
-def neodo_client():
-    """Create a test client for the Neo DO Server."""
-    return TestClient(neodo_app)
+def neodo_test_config():
+    """Load config for testing, potentially from a test-specific file or env."""
+    # Initialize ConfigManager with test config directory
+    config_manager = ConfigManager(config_dir="config")
+    # Load config for neodo server, will use default.yaml if test.yaml doesn't exist
+    return config_manager.load_config("neodo")
+
+
+@pytest.fixture(scope="session")
+def valid_api_key(neodo_test_config):
+    """Provide a valid API key from the loaded test config."""
+    # Assumes the test config has API keys defined
+    if not neodo_test_config.api_keys:
+        pytest.skip("No API keys found in the loaded configuration.")
+    # Return the first key found
+    return list(neodo_test_config.api_keys.keys())[0]
+
+
+@pytest.fixture(scope="session")
+def neodo_client(neodo_test_config):
+    """Create a test client for the Neo DO Server with DO Manager mocked."""
+    with patch('server.neodo.server.digitalocean.Manager') as mock_manager:
+        # Configure mock Manager instance
+        mock_manager_instance = MagicMock()
+
+        # Configure mock Droplet returned by get_droplet
+        mock_droplet = MagicMock()
+        mock_droplet.id = 123 # Ensure consistent ID
+        mock_droplet.power_on.return_value = None
+        mock_droplet.power_off.return_value = None
+        mock_droplet.reboot.return_value = None
+        mock_droplet.shutdown.return_value = None
+        
+        # Configure mock Snapshot returned by take_snapshot
+        mock_snapshot = MagicMock()
+        mock_snapshot.id = 456 # Ensure consistent ID
+        mock_droplet.take_snapshot.return_value = mock_snapshot
+        
+        # Configure the Manager mock to return the mock Droplet
+        mock_manager_instance.get_droplet.return_value = mock_droplet
+        
+        # Assign the configured instance to the patch
+        mock_manager.return_value = mock_manager_instance
+
+        # Create the app *after* the patch is active
+        app = create_neodo_app(config=neodo_test_config, env="test")
+
+        # Optionally attach mocks to app state for test access
+        app.state.mock_do_manager = mock_manager_instance
+        app.state.mock_droplet = mock_droplet
+        app.state.mock_snapshot = mock_snapshot
+
+        # Yield the TestClient
+        with TestClient(app) as client:
+            yield client
 
 
 @pytest.fixture(scope="session")

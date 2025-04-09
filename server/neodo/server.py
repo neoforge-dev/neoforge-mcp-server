@@ -3,7 +3,7 @@ Neo DO MCP Server - Provides DigitalOcean operations and management.
 """
 
 from typing import Any, Dict, Optional, List
-from fastapi import Depends, HTTPException, Security
+from fastapi import Depends, HTTPException, Security, Body
 from fastapi.security import APIKeyHeader
 import os
 import json
@@ -12,6 +12,7 @@ import subprocess
 import shutil
 import digitalocean
 from fastapi import FastAPI
+from pydantic import BaseModel
 
 from ..utils.base_server import BaseServer
 from ..utils.error_handling import handle_exceptions, MCPError
@@ -19,6 +20,38 @@ from ..utils.security import ApiKey
 
 # API key header
 api_key_header = APIKeyHeader(name="X-API-Key")
+
+# --- Pydantic Request Models ---
+
+class OperationRequest(BaseModel):
+    operation: str
+    parameters: Dict[str, Any]
+
+class ManageRequest(BaseModel):
+    action: str
+    resource_type: str
+    resource_id: int
+
+class MonitorRequest(BaseModel):
+    resource_type: Optional[str] = None
+    resource_id: Optional[int] = None
+
+class BackupRequest(BaseModel):
+    resource_type: str
+    resource_id: int
+    backup_name: str
+
+class RestoreRequest(BaseModel):
+    backup_id: str
+    resource_type: str
+    resource_id: int
+
+class ScaleRequest(BaseModel):
+    resource_type: str
+    resource_id: int
+    scale_factor: float
+
+# --- Server Class ---
 
 class NeoDOServer(BaseServer):
     """Neo DO MCP Server implementation."""
@@ -60,15 +93,13 @@ class NeoDOServer(BaseServer):
         @self.app.post("/api/v1/do/operations")
         @handle_exceptions()
         async def perform_operation(
-            operation: str,
-            parameters: Dict[str, Any],
+            request_body: OperationRequest,
             api_key: ApiKey = Depends(self.get_api_key)
         ) -> Dict[str, Any]:
             """Perform a DigitalOcean operation.
             
             Args:
-                operation: Operation to perform
-                parameters: Operation parameters
+                request_body: Operation request body
                 api_key: Validated API key
                 
             Returns:
@@ -92,25 +123,27 @@ class NeoDOServer(BaseServer):
             with self.monitor.span_in_context(
                 "do_operation",
                 attributes={
-                    "operation": operation,
-                    "parameters": parameters
+                    "operation": request_body.operation,
+                    "parameters": request_body.parameters
                 }
             ):
                 try:
                     # TODO: Implement DO operations
                     return {
                         "status": "success",
-                        "operation": operation,
-                        "parameters": parameters,
+                        "operation": request_body.operation,
+                        "parameters": request_body.parameters,
                         "result": {}
                     }
                     
                 except Exception as e:
                     self.logger.error(
                         "DO operation failed",
-                        error=str(e),
-                        operation=operation,
-                        parameters=parameters
+                        extra={
+                            "error": str(e),
+                            "operation": request_body.operation,
+                            "parameters": request_body.parameters
+                        }
                     )
                     raise HTTPException(
                         status_code=500,
@@ -120,17 +153,13 @@ class NeoDOServer(BaseServer):
         @self.app.post("/api/v1/do/management")
         @handle_exceptions()
         async def manage_resources(
-            action: str,
-            resource_type: str,
-            resource_id: str,
+            request_body: ManageRequest,
             api_key: ApiKey = Depends(self.get_api_key)
         ) -> Dict[str, Any]:
             """Manage DigitalOcean resources.
             
             Args:
-                action: Action to perform
-                resource_type: Type of resource
-                resource_id: Resource ID
+                request_body: Manage request body
                 api_key: Validated API key
                 
             Returns:
@@ -154,48 +183,52 @@ class NeoDOServer(BaseServer):
             with self.monitor.span_in_context(
                 "manage_resources",
                 attributes={
-                    "action": action,
-                    "resource_type": resource_type,
-                    "resource_id": resource_id
+                    "action": request_body.action,
+                    "resource_type": request_body.resource_type,
+                    "resource_id": str(request_body.resource_id)
                 }
             ):
                 try:
-                    if resource_type == "droplet":
-                        droplet = self.do_manager.get_droplet(resource_id)
+                    if request_body.resource_type == "droplet":
+                        droplet = self.do_manager.get_droplet(request_body.resource_id)
                         
-                        if action == "power_on":
+                        # Convert int to string for logging/response if needed
+                        str_resource_id = str(request_body.resource_id)
+                        if request_body.action == "power_on":
                             droplet.power_on()
-                        elif action == "power_off":
+                        elif request_body.action == "power_off":
                             droplet.power_off()
-                        elif action == "reboot":
+                        elif request_body.action == "reboot":
                             droplet.reboot()
-                        elif action == "shutdown":
+                        elif request_body.action == "shutdown":
                             droplet.shutdown()
                         else:
                             raise HTTPException(
                                 status_code=400,
-                                detail=f"Unsupported action for droplets: {action}"
+                                detail=f"Unsupported action for droplets: {request_body.action}"
                             )
                             
                         return {
                             "status": "success",
-                            "action": action,
-                            "resource_type": resource_type,
-                            "resource_id": resource_id
+                            "action": request_body.action,
+                            "resource_type": request_body.resource_type,
+                            "resource_id": str_resource_id
                         }
                     else:
                         raise HTTPException(
                             status_code=400,
-                            detail=f"Unsupported resource type: {resource_type}"
+                            detail=f"Unsupported resource type: {request_body.resource_type}"
                         )
                     
                 except Exception as e:
                     self.logger.error(
                         "Resource management failed",
-                        error=str(e),
-                        action=action,
-                        resource_type=resource_type,
-                        resource_id=resource_id
+                        extra={
+                            "error": str(e),
+                            "action": request_body.action,
+                            "resource_type": request_body.resource_type,
+                            "resource_id": str_resource_id
+                        }
                     )
                     raise HTTPException(
                         status_code=500,
@@ -206,7 +239,7 @@ class NeoDOServer(BaseServer):
         @handle_exceptions()
         async def monitor_resources(
             resource_type: Optional[str] = None,
-            resource_id: Optional[str] = None,
+            resource_id: Optional[int] = None,
             api_key: ApiKey = Depends(self.get_api_key)
         ) -> Dict[str, Any]:
             """Monitor DigitalOcean resources.
@@ -238,7 +271,7 @@ class NeoDOServer(BaseServer):
                 "monitor_resources",
                 attributes={
                     "resource_type": resource_type,
-                    "resource_id": resource_id
+                    "resource_id": str(resource_id) if resource_id is not None else None
                 }
             ):
                 try:
@@ -253,9 +286,11 @@ class NeoDOServer(BaseServer):
                 except Exception as e:
                     self.logger.error(
                         "Resource monitoring failed",
-                        error=str(e),
-                        resource_type=resource_type,
-                        resource_id=resource_id
+                        extra={
+                            "error": str(e),
+                            "resource_type": resource_type,
+                            "resource_id": str(resource_id) if resource_id is not None else None
+                        }
                     )
                     raise HTTPException(
                         status_code=500,
@@ -265,17 +300,13 @@ class NeoDOServer(BaseServer):
         @self.app.post("/api/v1/do/backup")
         @handle_exceptions()
         async def backup_resources(
-            resource_type: str,
-            resource_id: str,
-            backup_name: str,
+            request_body: BackupRequest,
             api_key: ApiKey = Depends(self.get_api_key)
         ) -> Dict[str, Any]:
             """Backup DigitalOcean resources.
             
             Args:
-                resource_type: Type of resource to backup
-                resource_id: Resource ID to backup
-                backup_name: Name for the backup
+                request_body: Backup request body
                 api_key: Validated API key
                 
             Returns:
@@ -299,36 +330,38 @@ class NeoDOServer(BaseServer):
             with self.monitor.span_in_context(
                 "backup_resources",
                 attributes={
-                    "resource_type": resource_type,
-                    "resource_id": resource_id,
-                    "backup_name": backup_name
+                    "resource_type": request_body.resource_type,
+                    "resource_id": str(request_body.resource_id),
+                    "backup_name": request_body.backup_name
                 }
             ):
                 try:
-                    if resource_type == "droplet":
-                        droplet = self.do_manager.get_droplet(resource_id)
-                        snapshot = droplet.take_snapshot(backup_name)
+                    if request_body.resource_type == "droplet":
+                        droplet = self.do_manager.get_droplet(request_body.resource_id)
+                        snapshot = droplet.take_snapshot(name=request_body.backup_name, power_off=False)
                         
                         return {
                             "status": "success",
-                            "resource_type": resource_type,
-                            "resource_id": resource_id,
-                            "backup_name": backup_name,
-                            "snapshot_id": snapshot.id
+                            "message": "Snapshot created successfully",
+                            "snapshot_id": snapshot.id,
+                            "resource_type": request_body.resource_type,
+                            "resource_id": str(request_body.resource_id)
                         }
                     else:
                         raise HTTPException(
                             status_code=400,
-                            detail=f"Unsupported resource type: {resource_type}"
+                            detail=f"Unsupported resource type: {request_body.resource_type}"
                         )
                     
                 except Exception as e:
                     self.logger.error(
                         "Resource backup failed",
-                        error=str(e),
-                        resource_type=resource_type,
-                        resource_id=resource_id,
-                        backup_name=backup_name
+                        extra={
+                            "error": str(e),
+                            "resource_type": request_body.resource_type,
+                            "resource_id": str(request_body.resource_id),
+                            "backup_name": request_body.backup_name
+                        }
                     )
                     raise HTTPException(
                         status_code=500,
@@ -338,17 +371,13 @@ class NeoDOServer(BaseServer):
         @self.app.post("/api/v1/do/restore")
         @handle_exceptions()
         async def restore_resources(
-            backup_id: str,
-            resource_type: str,
-            resource_id: str,
+            request_body: RestoreRequest,
             api_key: ApiKey = Depends(self.get_api_key)
         ) -> Dict[str, Any]:
             """Restore DigitalOcean resources from backup.
             
             Args:
-                backup_id: ID of backup to restore
-                resource_type: Type of resource to restore
-                resource_id: Resource ID to restore to
+                request_body: Restore request body
                 api_key: Validated API key
                 
             Returns:
@@ -372,38 +401,40 @@ class NeoDOServer(BaseServer):
             with self.monitor.span_in_context(
                 "restore_resources",
                 attributes={
-                    "backup_id": backup_id,
-                    "resource_type": resource_type,
-                    "resource_id": resource_id
+                    "backup_id": request_body.backup_id,
+                    "resource_type": request_body.resource_type,
+                    "resource_id": str(request_body.resource_id)
                 }
             ):
                 try:
-                    if resource_type == "droplet":
-                        droplet = self.do_manager.get_droplet(resource_id)
-                        snapshot = self.do_manager.get_snapshot(backup_id)
+                    if request_body.resource_type == "droplet":
+                        droplet = self.do_manager.get_droplet(request_body.resource_id)
+                        snapshot = self.do_manager.get_snapshot(request_body.backup_id)
                         
                         # Restore from snapshot
                         droplet.restore(snapshot.id)
                         
                         return {
                             "status": "success",
-                            "backup_id": backup_id,
-                            "resource_type": resource_type,
-                            "resource_id": resource_id
+                            "backup_id": request_body.backup_id,
+                            "resource_type": request_body.resource_type,
+                            "resource_id": request_body.resource_id
                         }
                     else:
                         raise HTTPException(
                             status_code=400,
-                            detail=f"Unsupported resource type: {resource_type}"
+                            detail=f"Unsupported resource type: {request_body.resource_type}"
                         )
                     
                 except Exception as e:
                     self.logger.error(
                         "Resource restore failed",
-                        error=str(e),
-                        backup_id=backup_id,
-                        resource_type=resource_type,
-                        resource_id=resource_id
+                        extra={
+                            "error": str(e),
+                            "backup_id": request_body.backup_id,
+                            "resource_type": request_body.resource_type,
+                            "resource_id": str(request_body.resource_id)
+                        }
                     )
                     raise HTTPException(
                         status_code=500,
@@ -413,17 +444,13 @@ class NeoDOServer(BaseServer):
         @self.app.post("/api/v1/do/scale")
         @handle_exceptions()
         async def scale_resources(
-            resource_type: str,
-            resource_id: str,
-            scale_factor: float,
+            request_body: ScaleRequest,
             api_key: ApiKey = Depends(self.get_api_key)
         ) -> Dict[str, Any]:
             """Scale DigitalOcean resources.
             
             Args:
-                resource_type: Type of resource to scale
-                resource_id: Resource ID to scale
-                scale_factor: Scaling factor
+                request_body: Scale request body
                 api_key: Validated API key
                 
             Returns:
@@ -447,14 +474,14 @@ class NeoDOServer(BaseServer):
             with self.monitor.span_in_context(
                 "scale_resources",
                 attributes={
-                    "resource_type": resource_type,
-                    "resource_id": resource_id,
-                    "scale_factor": scale_factor
+                    "resource_type": request_body.resource_type,
+                    "resource_id": str(request_body.resource_id),
+                    "scale_factor": request_body.scale_factor
                 }
             ):
                 try:
-                    if resource_type == "droplet":
-                        droplet = self.do_manager.get_droplet(resource_id)
+                    if request_body.resource_type == "droplet":
+                        droplet = self.do_manager.get_droplet(request_body.resource_id)
                         
                         # Get current size
                         current_size = droplet.size_slug
@@ -465,7 +492,7 @@ class NeoDOServer(BaseServer):
                         current_index = size_slugs.index(current_size)
                         new_index = min(
                             len(size_slugs) - 1,
-                            max(0, int(current_index * scale_factor))
+                            max(0, int(current_index * request_body.scale_factor))
                         )
                         new_size = size_slugs[new_index]
                         
@@ -474,25 +501,27 @@ class NeoDOServer(BaseServer):
                         
                         return {
                             "status": "success",
-                            "resource_type": resource_type,
-                            "resource_id": resource_id,
-                            "scale_factor": scale_factor,
+                            "resource_type": request_body.resource_type,
+                            "resource_id": request_body.resource_id,
+                            "scale_factor": request_body.scale_factor,
                             "old_size": current_size,
                             "new_size": new_size
                         }
                     else:
                         raise HTTPException(
                             status_code=400,
-                            detail=f"Unsupported resource type: {resource_type}"
+                            detail=f"Unsupported resource type: {request_body.resource_type}"
                         )
                     
                 except Exception as e:
                     self.logger.error(
                         "Resource scaling failed",
-                        error=str(e),
-                        resource_type=resource_type,
-                        resource_id=resource_id,
-                        scale_factor=scale_factor
+                        extra={
+                            "error": str(e),
+                            "resource_type": request_body.resource_type,
+                            "resource_id": str(request_body.resource_id),
+                            "scale_factor": request_body.scale_factor
+                        }
                     )
                     raise HTTPException(
                         status_code=500,
@@ -500,9 +529,21 @@ class NeoDOServer(BaseServer):
                     )
 
 # App Factory pattern
-def create_app() -> FastAPI:
-    """Factory function to create the NeoDOServer FastAPI app."""
+def create_app(config=None, env=None) -> FastAPI:
+    """Factory function to create the NeoDOServer FastAPI app.
+    
+    Args:
+        config: Optional server configuration
+        env: Optional environment name
+        
+    Returns:
+        FastAPI application instance
+    """
     server = NeoDOServer()
+    if config:
+        server.config = config
+    if env:
+        server.env = env
     # Routes are registered in BaseServer init
     return server.app
 

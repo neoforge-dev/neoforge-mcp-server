@@ -3,7 +3,7 @@ Neo DO MCP Server package.
 """
 
 from . import server
-from .server import app
+from .server import create_app
 # Import tool functions from the correct utils location
 from ..utils.file_operations import (
     read_file,
@@ -18,7 +18,7 @@ from ..utils.file_operations import (
 
 __all__ = [
     "server", 
-    "app",
+    "create_app",
     # Exported tool functions
     "read_file",
     "write_file",

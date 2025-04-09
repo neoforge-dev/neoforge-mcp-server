@@ -7,8 +7,11 @@ Main package for the MCP server application.
 
 __version__ = "0.1.0"
 
-# Core server components (app, server object)
-from .core import server, app
+# Core server components (use factory)
+from .core import create_app
+
+# Create the main application instance using the core factory
+app = create_app()
 
 # Utils (Import specific necessary utils if needed, or rely on sub-package access)
 # Example: from .utils.error_handling import SecurityError
@@ -41,9 +44,8 @@ from .core import (
 # from .neollm import server as neollm_server
 
 __all__ = [
-    # Core Server
-    "server", 
-    "app", 
+    # Core Server App
+    "app", # Export only the created app instance
     
     # Command Execution
     "execute_command",

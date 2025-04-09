@@ -3,13 +3,15 @@ Core MCP Server - Provides core functionality and command execution.
 """
 
 from typing import Any, Dict, Optional
-from fastapi import Depends, HTTPException, Security, Request
+from fastapi import Depends, HTTPException, Security, Request, FastAPI
 from fastapi.security import APIKeyHeader
 from fastapi.responses import StreamingResponse
 import json
 import time
 import asyncio
 import uuid
+import os
+from fastapi.middleware.cors import CORSMiddleware
 
 from ..utils.base_server import BaseServer
 from ..utils.error_handling import handle_exceptions, MCPError
@@ -301,6 +303,13 @@ class CoreMCPServer(BaseServer):
                     "message": f"Command pattern '{command}' unblocked"
                 }
 
-# Create server instance
-server = CoreMCPServer()
-app = server.app 
+# App Factory pattern
+def create_app() -> FastAPI:
+    """Factory function to create the CoreMCPServer FastAPI app."""
+    server = CoreMCPServer()
+    # Routes are registered in BaseServer init
+    return server.app
+
+# Remove direct instantiation
+# server = CoreMCPServer()
+# app = server.app 

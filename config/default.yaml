@@ -1,6 +1,51 @@
-do_token: "test_do_token_from_config" # Placeholder for tests
+# Server configuration
+name: "mcp_server"
+version: "1.0.0"
+port: 7449 # Default port for NeoDO server
+log_level: "info"
 
+# Resource limits
+max_processes: 4
+max_memory_percent: 90.0
+max_cpu_percent: 90.0
+max_disk_percent: 90.0
+max_runtime: 3600
+check_resources: true
+
+# API keys and tokens
+do_token: "test_do_token_from_config" # Placeholder for tests
 api_keys:
   test-api-key: # Description: API Key for testing purposes
     permissions:
       - "*:*"
+
+# DigitalOcean settings
+enable_do_operations: true
+enable_do_management: true
+enable_do_monitoring: true
+enable_do_backup: true
+enable_do_restore: true
+enable_do_scaling: true
+
+# Security settings
+enable_auth: true
+allowed_origins:
+  - "http://localhost:*"
+  - "https://localhost:*"
+
+# Monitoring settings
+enable_metrics: true
+metrics_port: 9090
+enable_health_checks: true
+health_check_interval: 30
+enable_tracing: false
+
+# Logging settings
+log_file: "neodo_server.log"
+log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+log_rotation: "1 day"
+log_retention: 7
+
+# Debug settings
+debug: false
+reload: false

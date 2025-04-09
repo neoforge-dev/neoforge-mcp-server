@@ -287,24 +287,30 @@ class CommandExecutor:
         Returns:
             Dictionary with active processes
         """
-        # Add try...except within the method for basic error handling
         try:
             with self._process_lock:
                 processes = []
-                for pid, info in self._active_processes.items():
-                    process = info.get("process") # Use get for safety
+                # Use .items() for potentially slightly better performance if dict is large
+                for pid, info in self._active_processes.items(): 
+                    process = info.get("process")
                     if process:
+                        is_running = process.poll() is None
+                        current_status = info.get("status", "unknown") # Get tracked status
+                        # Update status if process finished but wasn't cleaned up yet
+                        if not is_running and current_status == "running":
+                             current_status = "finished" # Or derive from poll() if needed
+                        
                         processes.append({
                             "pid": pid,
                             "command": info.get("command", "<unknown>"),
-                            "running": process.poll() is None,
+                            "running": is_running, # Keep 'running' for consistency?
+                            "status": current_status, # Add the status field
                             "start_time": info.get("start_time", 0),
                             "duration": time.time() - info.get("start_time", time.time())
                         })
                     else:
-                        # Log or handle cases where process object might be missing
                         print(f"Warning: Process object missing for PID {pid} in _active_processes.")
-                        
+
             return {
                 "status": "success",
                 "processes": processes
@@ -312,6 +318,66 @@ class CommandExecutor:
         except Exception as e:
              print(f"Error during list_processes: {e}")
              return {"status": "error", "error": f"Failed to list processes: {e}", "error_code": "LIST_ERROR"}
+
+    # --- New method for true background execution ---
+    def start_background(
+        self,
+        command: str,
+        cwd: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Start a command in the background without waiting for it.
+
+        Args:
+            command: Command to execute
+            cwd: Working directory
+            env: Environment variables
+
+        Returns:
+            Dictionary with process PID and status.
+        """
+        try:
+            # Validate command and check resources
+            self._validate_command(command)
+            self._check_resources()
+        except (SecurityError, ResourceError) as e:
+            print(f"Pre-execution check failed for background command '{command}': {e}")
+            return {"status": "error", "error": str(e), "error_code": getattr(e, 'error_code', 'PREFLIGHT_ERROR'), "pid": None}
+        except Exception as e_preflight:
+            print(f"Unexpected pre-flight error for background command '{command}': {e_preflight}")
+            return {"status": "error", "error": f"Unexpected pre-flight check error: {e_preflight}", "error_code": "PREFLIGHT_UNEXPECTED", "pid": None}
+
+        process = None
+        pid = None
+        try:
+            # Create process
+            process, stdout_queue, stderr_queue = self._create_process(command, cwd, env)
+            pid = process.pid
+            print(f"Started background process {pid} for command: {command}")
+
+            # Track process
+            with self._process_lock:
+                self._active_processes[pid] = {
+                    "process": process,
+                    "command": command,
+                    "start_time": time.time(),
+                    "stdout_queue": stdout_queue,
+                    "stderr_queue": stderr_queue,
+                    "status": "running" # Initial status
+                }
+
+            # Return immediately without waiting
+            return {
+                "status": "success", # Indicates successful launch
+                "pid": pid,
+                "message": f"Command '{command}' started in background with PID {pid}"
+            }
+
+        except Exception as e_runtime:
+            # Catch errors during process creation/tracking
+            print(f"Runtime error starting background command '{command}' (PID: {pid}): {e_runtime}")
+            # No need to terminate here as process likely didn't start fully or track
+            return {"status": "error", "error": f"Runtime error starting background command: {e_runtime}", "error_code": "RUNTIME_UNEXPECTED", "pid": pid}
 
     def execute(
         self,

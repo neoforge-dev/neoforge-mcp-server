@@ -1,35 +1,25 @@
 # Product Context
 
-## Purpose
-- Distributed system for AI-enhanced dev/ops tasks.
+## Purpose & Goals
+- Distributed system for AI-enhanced dev/ops tasks
+- Improve: SoC, scalability, maintainability, security, monitoring
 
-## Problems Solved (Arch)
-- Improves: Separation of concerns, scalability, maintainability, security, monitoring.
+## Success Metrics
+- Performance: <100ms resp, 99.9% uptime, <1% errors
+- Security: No critical vulns, full input validation
+- Dev: >90% test coverage, clean code standards
 
-## Key Success Metrics (Goals)
-- **Performance:** <100ms response, 99.9% uptime, <1% errors.
-- **Security:** No critical vulns, full input validation.
-- **Dev:** >90% test coverage, clean code standards.
+## Server Roles
+- Core: Coordination, Tool Mgmt
+- LLM: Model Ops, Code Gen
+- NeoDev: Dev Tools, Workspaces
+- NeoOps: Process/Resource Monitoring
+- NeoLocal: Local System Ops
+- NeoLLM: Local Model Ops
+- NeoDO: Direct Execution
 
-## Servers (Function & Port)
-- **Core (7443):** Tool mgmt, coordination
-- **LLM (7444):** Model ops, code gen
-- **NeoDev (7445):** Dev tools, workspaces
-- **NeoOps (7446):** Process/resource monitoring
-- **NeoLocal (7447):** Local system ops
-- **NeoLLM (7448):** Local model ops
-- **NeoDO (7449):** Direct execution
-*(`project-brief.md` is primary port reference)*
+## Basic Flow
+1. Request → 2. Validate/Auth → 3. Process → 4. Response → 5. Log/Monitor
 
-## Basic Request Flow
-1. Receive Request
-2. Validate + AuthN/Z
-3. Process Logic
-4. Send Response
-5. Log/Monitor
-
-## Future Considerations
-- Scaling (Load Balancing)
-- Feature Expansion (Tools, Security)
-- Integrations (LLMs, Services)
-- UX Improvements 
+## Future
+- Scaling, Features, Integrations, UX. 

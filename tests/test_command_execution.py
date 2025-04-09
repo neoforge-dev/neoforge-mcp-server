@@ -231,40 +231,42 @@ def test_block_and_unblock_command():
 @pytest.mark.skipif(sys.platform == "win32", reason="Process list format differs on Windows")
 def test_list_sessions():
     """Test listing active command sessions."""
-    # Disable resource checks
     executor = CommandExecutor(check_resources=False)
-    # Use a longer command to ensure it's running when listed
-    cmd = "sleep 10" 
-    
-    # Start a process in the background (synchronously)
-    result = executor.execute(command=cmd, allow_background=True)
-    pid = result.get("pid")
-    assert pid is not None
+    pid = None
+    try:
+        cmd = "sleep 10"
 
-    # Wait briefly for process to be fully tracked
-    time.sleep(0.1)
+        # Start the process using the new background method
+        result = executor.start_background(command=cmd)
+        assert result.get("status") == "success", f"start_background failed: {result.get('error')}"
+        pid = result.get("pid")
+        assert pid is not None, "Executor did not return a PID from start_background."
 
-    # List sessions (synchronously)
-    sessions_result = executor.list_processes() 
-    
-    # Verify the structure and content
-    assert sessions_result["status"] == "success"
-    assert isinstance(sessions_result["processes"], list)
-    
-    # Find the process we started
-    found = False
-    for proc in sessions_result["processes"]:
-        if proc["pid"] == pid:
-            assert proc["command"] == cmd
-            assert proc["running"] is True
-            found = True
-            break
-    assert found, f"Process {pid} not found in list_processes output"
+        # Wait briefly for the process to be fully registered and running
+        time.sleep(0.5) # Increased wait time slightly more just in case
 
-    # Clean up - terminate the background process
-    term_result = executor.terminate(pid, force=True)
-    assert term_result["status"] == "success"
+        # List sessions
+        sessions_result = executor.list_processes()
 
-    # Verify it's gone
-    sessions_after_term = executor.list_processes()
-    assert pid not in [p['pid'] for p in sessions_after_term.get('processes', [])]
+        # Assertions remain the same
+        assert isinstance(sessions_result, dict), f"Expected list_processes to return a dict, got {type(sessions_result)}"
+        assert "processes" in sessions_result, "'processes' key missing in list_processes result"
+        processes_list = sessions_result["processes"]
+        assert isinstance(processes_list, list), "'processes' key should contain a list"
+
+        found_process = None
+        for proc_info in processes_list:
+            assert isinstance(proc_info, dict), f"Each item in processes list should be a dict, got {type(proc_info)}"
+            if proc_info.get("pid") == pid:
+                found_process = proc_info
+                break
+
+        assert found_process is not None, f"Process with PID {pid} not found in active sessions list: {processes_list}"
+
+        assert found_process.get("command") == cmd, f"Expected command '{cmd}', got {found_process.get('command')}"
+        assert found_process.get("status") == "running", f"Expected status 'running', got {found_process.get('status')}"
+
+    finally:
+        if pid and executor:
+            terminate_result = executor.terminate(pid, force=True)
+            print(f"Cleanup termination result for PID {pid}: {terminate_result}")

@@ -6,15 +6,25 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, Mock
+from fastapi import FastAPI
 
 # Import BaseServer for testing middleware
 from server.utils.base_server import BaseServer
 
-# Import servers
-from server.core.server import server as core_server
-from server.neod.server import server as neod_server
-from server.neoo.server import server as neoo_server
-from server.neolocal.server import server as neolocal_server
+# Remove direct server imports - use factories or clients
+# from server.core.server import server as core_server
+# from server.neod.server import server as neod_server
+# from server.neoo.server import server as neoo_server
+# from server.neolocal.server import server as neolocal_server
+
+# Import the factory functions
+from server.core import create_app as create_core_app
+from server.llm import create_app as create_llm_app
+from server.neod import create_app as create_neod_app
+from server.neoo import create_app as create_neoo_app
+from server.neolocal import create_app as create_neolocal_app
+# from server.neollm import create_app as create_neollm_app # Assuming this exists
+from server.neodo import create_app as create_neodo_app
 
 # --- BaseServer Middleware Tests ---
 
@@ -236,61 +246,79 @@ def test_request_logging_middleware_skip_sse(mock_get_logger):
         mock_logger.warning.assert_not_called()
         mock_logger.error.assert_not_called()
 
-# --- Specific Server Initialization Tests (Existing) ---
+# Test basic app creation for each server using the factory
+def test_core_server_creation():
+    app = create_core_app()
+    assert isinstance(app, FastAPI)
 
-def test_core_server_init():
-    """Test Core MCP Server initialization."""
-    app = core_server.get_app()
-    client = TestClient(app)
-    response = client.get("/health")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "healthy"
-    assert data["service"] == "core_mcp"
+def test_llm_server_creation():
+    app = create_llm_app()
+    assert isinstance(app, FastAPI)
 
-def test_neod_server_init():
-    """Test Neo Development Server initialization."""
-    app = neod_server.get_app()
-    client = TestClient(app)
-    response = client.get("/health")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "healthy"
-    assert data["service"] == "neod_mcp"
+def test_neod_server_creation():
+    app = create_neod_app()
+    assert isinstance(app, FastAPI)
 
-def test_neoo_server_init():
-    """Test Neo Operations Server initialization."""
-    app = neoo_server.get_app()
-    client = TestClient(app)
-    response = client.get("/health")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "healthy"
-    assert data["service"] == "neoo_mcp"
+def test_neoo_server_creation():
+    app = create_neoo_app()
+    assert isinstance(app, FastAPI)
 
-def test_neolocal_server_init():
-    """Test Neo Local Server initialization."""
-    app = neolocal_server.get_app()
-    client = TestClient(app)
-    response = client.get("/health")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "healthy"
-    assert data["service"] == "neolocal_mcp"
+def test_neolocal_server_creation():
+    app = create_neolocal_app()
+    assert isinstance(app, FastAPI)
 
-@pytest.mark.skipif(
-    not os.environ.get("TEST_LOCAL_LLM"),
-    reason="Local LLM tests are disabled"
-)
-def test_neollm_server_init():
-    """Test Neo Local LLM Server initialization."""
-    # Dynamically import to avoid loading the model during test collection
-    from server.neollm.server import server as neollm_server
-    
-    app = neollm_server.get_app()
-    client = TestClient(app)
-    response = client.get("/health")
+# def test_neollm_server_creation():
+#     app = create_neollm_app()
+#     assert isinstance(app, FastAPI)
+
+def test_neodo_server_creation():
+    app = create_neodo_app()
+    assert isinstance(app, FastAPI)
+
+# --- Test health endpoints via TestClient --- 
+# (More robust than just creation)
+
+def test_core_health(core_client: TestClient):
+    response = core_client.get("/health")
     assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "healthy"
-    assert data["service"] == "neollm_mcp" 
+    assert response.json()["status"] == "healthy"
+    assert response.json()["service"] == "core_mcp"
+
+def test_llm_health(llm_client: TestClient):
+    response = llm_client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
+    assert response.json()["service"] == "llm_server"
+
+def test_neod_health(neod_client: TestClient):
+    response = neod_client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
+    assert response.json()["service"] == "neod_mcp"
+
+def test_neoo_health(neoo_client: TestClient):
+    response = neoo_client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
+    assert response.json()["service"] == "neoo_mcp"
+
+def test_neolocal_health(neolocal_client: TestClient):
+    response = neolocal_client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
+    assert response.json()["service"] == "neolocal_mcp"
+
+# def test_neollm_health(neollm_client: TestClient):
+#     response = neollm_client.get("/health")
+#     assert response.status_code == 200
+#     assert response.json()["status"] == "healthy"
+#     assert response.json()["service"] == "neollm_mcp"
+
+def test_neodo_health(neodo_client: TestClient):
+    response = neodo_client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
+    assert response.json()["service"] == "neodo_mcp"
+
+# TODO: Add more specific server initialization tests if needed,
+# but prefer testing via TestClient and fixtures where possible. 

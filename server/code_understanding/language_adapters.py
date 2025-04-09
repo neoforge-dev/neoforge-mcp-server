@@ -63,17 +63,50 @@ class BaseParserAdapter:
     def _handle_tree_errors(self, node: Node, mock_tree: MockTree):
         """Handle errors in the parse tree."""
         errors = []
+        
+        # Check if the node itself has an error
+        if node.has_error:
+            error_info = {
+                'type': 'syntax_error',
+                'node_type': node.type,
+                'start_point': node.start_point,
+                'end_point': node.end_point,
+                'text': self._get_node_text(node, mock_tree.code) if hasattr(mock_tree, 'code') else None
+            }
+            errors.append(error_info)
+            
+        # Check for ERROR nodes in children
         for child in node.children:
-            if child.has_error:
-                errors.append({
-                    'type': child.type,
+            if child.type == 'ERROR':
+                error_info = {
+                    'type': 'syntax_error',
+                    'node_type': 'ERROR',
                     'start_point': child.start_point,
-                    'end_point': child.end_point
-                })
+                    'end_point': child.end_point,
+                    'text': self._get_node_text(child, mock_tree.code) if hasattr(mock_tree, 'code') else None
+                }
+                errors.append(error_info)
+            elif child.has_error:
+                error_info = {
+                    'type': 'syntax_error',
+                    'node_type': child.type,
+                    'start_point': child.start_point,
+                    'end_point': child.end_point,
+                    'text': self._get_node_text(child, mock_tree.code) if hasattr(mock_tree, 'code') else None
+                }
+                errors.append(error_info)
             if child.children:
-                self._handle_tree_errors(child, mock_tree)
+                child_errors = self._handle_tree_errors(child, mock_tree)
+                if child_errors:
+                    errors.extend(child_errors)
+                    
         if errors:
-            mock_tree.errors = errors
+            if not hasattr(mock_tree, 'errors'):
+                mock_tree.errors = []
+            mock_tree.errors.extend(errors)
+            mock_tree.has_errors = True
+            
+        return errors
 
 class JavaScriptParserAdapter(BaseParserAdapter):
     """Parser adapter for JavaScript code using tree-sitter."""
@@ -164,6 +197,22 @@ class JavaScriptParserAdapter(BaseParserAdapter):
             self._check_memory_usage()
             tree = self.parser.parse(code_bytes)
             
+            # Store code in tree for error handling
+            tree.code = code
+            
+            # Check for syntax errors
+            if tree.root_node.has_error:
+                self.logger.warning("Syntax errors found in JavaScript code")
+                # Create a mock tree to store errors
+                mock_tree = MockTree()
+                mock_tree.root_node = self._tree_sitter_to_mock_node(tree.root_node)
+                mock_tree.code = code
+                # Handle errors
+                self._handle_tree_errors(tree.root_node, mock_tree)
+                # Transfer errors to the original tree
+                if hasattr(mock_tree, 'errors'):
+                    tree.errors = mock_tree.errors
+            
             return tree # Return the actual tree-sitter tree
         except Exception as e:
             self.logger.exception(f"Failed to parse JavaScript: {e}")
@@ -250,6 +299,21 @@ class JavaScriptParserAdapter(BaseParserAdapter):
                 
             # Use the internal feature extraction method
             features = self._extract_features(tree.root_node, code)
+
+            # Check for syntax errors
+            errors = []
+            if hasattr(tree, 'errors'):
+                errors.extend(tree.errors)
+            if tree.root_node.has_error:
+                self._handle_tree_errors(tree.root_node, tree)
+                if hasattr(tree, 'errors'):
+                    errors.extend(tree.errors)
+
+            # Add error information to the features
+            if errors:
+                features['has_errors'] = True
+                features['errors'] = errors
+
             return features
         except Exception as e:
             self.logger.exception(f"JavaScript analysis failed: {e}")
@@ -257,15 +321,6 @@ class JavaScriptParserAdapter(BaseParserAdapter):
             raise
             
     def _extract_features(self, node: Node, code: Union[str, bytes]) -> Dict[str, List[Dict]]:
-        """Extract features from the parse tree recursively.
-
-        Args:
-            node: The current tree-sitter node to process.
-            code: Original code.
-
-        Returns:
-            Dict: Features organized by type (functions, classes, etc.).
-        """
         features = {
             'functions': [],
             'classes': [],
@@ -274,21 +329,81 @@ class JavaScriptParserAdapter(BaseParserAdapter):
             'exports': []
         }
 
+        # Keep track of parent node during traversal for context (like catch clause)
+        parent_map = {node: None}
+        queue = [node]
+        while queue:
+            n = queue.pop(0)
+            for child in n.children:
+                parent_map[child] = n
+                queue.append(child)
+
         def traverse(current_node: Node):
             # Process the current node based on its type
             if current_node.type == 'function_declaration':
-                features['functions'].append(self._extract_function(current_node, code))
+                func_info = self._extract_function(current_node, code)
+                if func_info: features['functions'].append(func_info)
             elif current_node.type == 'class_declaration':
-                features['classes'].append(self._extract_class(current_node, code))
+                class_info = self._extract_class(current_node, code)
+                if class_info: features['classes'].append(class_info)
+            elif current_node.type == 'catch_clause':
+                param_node = current_node.child_by_field_name('parameter')
+                if param_node:
+                    # Extract the catch variable name
+                    var_name = self._get_node_text(param_node, code)
+                    var_info = {
+                        'name': var_name,
+                        'type': 'variable',
+                        'is_catch_variable': True,
+                        'line': param_node.start_point[0] + 1,
+                        'column': param_node.start_point[1],
+                        'end_line': param_node.end_point[0] + 1,
+                        'end_column': param_node.end_point[1]
+                    }
+                    features['variables'].append(var_info)
+
+                # Find the parent function and mark it as having a try-catch block
+                current = current_node
+                while current and current.type not in ('function_declaration', 'method_definition', 'arrow_function'):
+                    current = parent_map.get(current)
+                if current:
+                    # Find the corresponding function info in our features list
+                    for func in features['functions']:
+                        if func.get('line') == current.start_point[0] + 1:
+                            func['has_try_catch'] = True
+                            break
+            elif current_node.type == 'try_statement':
+                # Find the parent function and mark it as having a try-catch block
+                current = current_node
+                while current and current.type not in ('function_declaration', 'method_definition', 'arrow_function'):
+                    current = parent_map.get(current)
+                if current:
+                    # Find the corresponding function info in our features list
+                    for func in features['functions']:
+                        if func.get('line') == current.start_point[0] + 1:
+                            func['has_try_catch'] = True
+                            break
             elif current_node.type in ('variable_declaration', 'lexical_declaration'):
-                vars = self._extract_variables(current_node, code)
-                features['variables'].extend(vars)
+                vars_extracted = self._extract_variables(current_node, code)
+                parent_node = parent_map.get(current_node)
+                is_catch_var = parent_node and parent_node.type == 'catch_clause'
+                for var in vars_extracted:
+                    var['is_catch_variable'] = is_catch_var
+                features['variables'].extend(vars_extracted)
             elif current_node.type == 'import_statement':
-                features['imports'].append(self._extract_import(current_node, code))
+                import_info = self._extract_import(current_node, code)
+                if import_info: features['imports'].append(import_info)
             elif current_node.type == 'export_statement':
                  # Process exports, but also recurse into its children 
                  # (e.g., to find class/func defined within the export)
-                features['exports'].append(self._extract_export(current_node, code))
+                export_info = self._extract_export(current_node, code)
+                if export_info:
+                    # Handle cases where one export statement might yield multiple logical exports (e.g., re-exports)
+                    # _extract_export should return a list in such cases if needed
+                    if isinstance(export_info, list):
+                        features['exports'].extend(export_info)
+                    else:
+                        features['exports'].append(export_info)
             
             # Recursively process children
             for child in current_node.children:
@@ -297,109 +412,348 @@ class JavaScriptParserAdapter(BaseParserAdapter):
         # Start traversal from the provided node (usually the root)
         traverse(node)
 
+        # Deduplicate functions based on name and line number just in case
+        # Simple deduplication - might need refinement for complex cases
+        seen_functions = set()
+        deduped_functions = []
+        for func in features['functions']:
+            key = (func.get('name'), func.get('line'))
+            if key not in seen_functions:
+                seen_functions.add(key)
+                deduped_functions.append(func)
+        features['functions'] = deduped_functions
+
         return features
         
     def _extract_function(self, node: Node, code: Union[str, bytes]) -> Dict:
-        """Extract function information from a node.
-        
-        Args:
-            node: Function declaration node
-            code: Original code
-            
-        Returns:
-            Dict: Function information
-        """
+        """Extract function details (name, parameters, async status)."""
         name_node = node.child_by_field_name('name')
         name = self._get_node_text(name_node, code) if name_node else "<anonymous>"
         
-        # Get function signature
-        params_node = node.child_by_field_name('parameters')
+        # Check for async modifier
+        is_async = any(child.type == 'async' for child in node.children)
+        
+        # Extract parameters
         params = []
+        params_node = node.child_by_field_name('parameters')
         if params_node:
-            for param in params_node.children:
-                if param.type != ',' and param.type != '(' and param.type != ')':
-                    params.append(self._get_node_text(param, code))
-                    
+            for child in params_node.children:
+                if child.type == 'identifier':
+                    params.append(self._get_node_text(child, code))
+                elif child.type == 'rest_parameter':
+                    param_name = self._get_node_text(child, code)
+                    params.append(f"...{param_name}")
+        
+        # Check for arrow function
+        is_arrow = node.type == 'arrow_function'
+        
+        # Check for try-catch blocks
+        has_try_catch = False
+        body_node = node.child_by_field_name('body')
+        if body_node:
+            body_text = self._get_node_text(body_node, code)
+            has_try_catch = 'try' in body_text and 'catch' in body_text
+        
         return {
             'name': name,
             'type': 'function',
+            'is_async': is_async,
+            'is_arrow': is_arrow,
+            'parameters': params,
+            'has_try_catch': has_try_catch,
             'line': node.start_point[0] + 1,
             'column': node.start_point[1],
             'end_line': node.end_point[0] + 1,
-            'end_column': node.end_point[1],
-            'params': params
+            'end_column': node.end_point[1]
         }
         
     def _extract_class(self, node: Node, code: Union[str, bytes]) -> Dict:
-        """Extract class information from a node.
-        
-        Args:
-            node: Class declaration node
-            code: Original code
-            
-        Returns:
-            Dict: Class information
-        """
-        name_node = node.child_by_field_name('name')
-        name = self._get_node_text(name_node, code) if name_node else "<anonymous>"
-        
-        # Get parent class if it exists
-        heritage_node = node.child_by_field_name('heritage')
+        """Extract class details (name, parent, methods)."""
+        name = self._get_node_text(node.child_by_field_name('name'), code) if node.child_by_field_name('name') else "<anonymous>"
+        # Add checks for inheritance (extends clause)
         parent = None
-        if heritage_node:
-            parent = self._get_node_text(heritage_node, code)
-            
-        return {
+        # CORRECTED AGAIN: Use the 'superclass' field name as per tree-sitter grammar
+        superclass_node = node.child_by_field_name('superclass')
+        if superclass_node:
+             parent = self._get_node_text(superclass_node, code)
+
+        # Extract methods and fields
+        methods = []
+        fields = [] # Initialize fields list
+        body_node = node.child_by_field_name('body')
+        if body_node:
+            for child in body_node.children:
+                if child.type == 'method_definition':
+                    method_info = self._extract_function(child, code)
+                    if method_info:
+                        # Additional checks for method properties (static, private, getter/setter)
+                        modifiers = [m.type for m in child.children if m.type in ['static', 'get', 'set']] # Add 'get', 'set'
+                        if 'static' in modifiers:
+                            method_info['is_static'] = True
+                        # Check if name starts with # for private
+                        if method_info['name'].startswith('#'):
+                             method_info['is_private'] = True
+                        # Check for getter/setter
+                        if 'get' in modifiers:
+                             method_info['is_getter'] = True
+                        if 'set' in modifiers:
+                             method_info['is_setter'] = True
+
+                        # Check for super() call within constructor
+                        if method_info['name'] == 'constructor':
+                            body_node = child.child_by_field_name('body')
+                            if body_node:
+                                body_text = self._get_node_text(body_node, code)
+                                if 'super(' in body_text: # Simple check
+                                    method_info['calls_super'] = True
+
+                        methods.append(method_info)
+                elif child.type in ['field_definition', 'public_field_definition']: # Handle fields
+                     is_static = any(m.type == 'static' for m in child.children)
+                     name_node = child.child_by_field_name('name') \
+                                 or next((n for n in child.children if n.type in ['property_identifier', 'private_property_identifier']), None)
+                     value_node = child.child_by_field_name('value')
+
+                     if name_node:
+                         field_name = self._get_node_text(name_node, code)
+                         field_info = {
+                             'name': field_name,
+                             'type': 'field', # Distinguish fields from methods
+                             'is_static': is_static,
+                             'is_private': field_name.startswith('#'),
+                        'line': child.start_point[0] + 1,
+                        'column': child.start_point[1],
+                        'end_line': child.end_point[0] + 1,
+                             'end_column': child.end_point[1],
+                             'value': self._get_node_text(value_node, code) if value_node else None
+                         }
+                         fields.append(field_info) # Add to fields list
+
+        class_info = {
             'name': name,
             'type': 'class',
+            'extends': parent, # Renamed from 'parent'
+            'methods': methods,
+            'fields': fields, # Include fields in the class info
             'line': node.start_point[0] + 1,
             'column': node.start_point[1],
             'end_line': node.end_point[0] + 1,
-            'end_column': node.end_point[1],
-            'parent': parent
+            'end_column': node.end_point[1]
         }
+        return class_info
         
     def _extract_variables(self, node: Node, code: Union[str, bytes]) -> List[Dict]:
-        """Extract variable information from a node.
-        
-        Args:
-            node: Variable declaration node
-            code: Original code
-            
-        Returns:
-            List[Dict]: Variable information
-        """
+        """Extract variable details from declarations (const, let, var). Handles destructuring."""
         variables = []
         
-        # Process each declarator in the declaration
-        declaration_node = node.child_by_field_name('declaration')
-        if declaration_node:
-            for child in declaration_node.children:
-                if child.type == 'variable_declarator':
-                    name_node = child.child_by_field_name('name')
-                    if name_node:
-                        name = self._get_node_text(name_node, code)
-                        variables.append({
-                            'name': name,
+        # Helper function to recursively extract from patterns
+        # Pass the main features dict to potentially add functions directly? No, let traverse handle it.
+        def extract_pattern(pattern_node: Node, value_node: Optional[Node] = None) -> List[Dict]:
+            extracted = []
+            node_type = pattern_node.type
+
+            if node_type == 'identifier':
+                var_info = {
+                    'name': self._get_node_text(pattern_node, code),
+                    'type': 'variable',
+                    'line': pattern_node.start_point[0] + 1,
+                    'column': pattern_node.start_point[1],
+                    'end_line': pattern_node.end_point[0] + 1,
+                    'end_column': pattern_node.end_point[1],
+                    'is_destructured': False, # Default, might be updated by caller if inside pattern
+                    'destructure_type': None, # array or object
+                    'alias': None, # For renamed destructured variables
+                    'default_value': None, # For destructured variables with defaults
+                    'value': self._get_node_text(value_node, code) if value_node else None,
+                    # Add flags for specific value types
+                    'value_is_async_arrow': False,
+                    'is_template_literal': False,
+                    'is_tagged_template': False,
+                }
+                
+                 # Check value node type
+                if value_node:
+                     if value_node.type == 'arrow_function':
+                         # Check if the arrow function itself is async
+                         if any(c.type == 'async' for c in value_node.children):
+                             var_info['value_is_async_arrow'] = True
+                             # Extract params for potential use in function list
+                             params = []
+                             has_destructured_params = False
+                             param_node = value_node.child_by_field_name('parameters')
+                             if param_node:
+                                 params_text = self._get_node_text(param_node, code)
+                                 params = [p.strip() for p in params_text.strip('()').split(',') if p.strip()]
+                                 if any(pat in params_text for pat in ['{', '[', '...']):
+                                      has_destructured_params = True
+                             elif len(value_node.children) > 0 and value_node.children[0].type == 'identifier' and value_node.children[1].type == '=>':
+                                 param_node = value_node.children[0]
+                                 params_text = self._get_node_text(param_node, code)
+                                 params = [params_text.strip()]
+                             var_info['arrow_params'] = params
+                             var_info['arrow_has_destructured_params'] = has_destructured_params
+                             
+                     elif value_node.type == 'template_string':
+                          var_info['is_template_literal'] = True
+                     elif value_node.type == 'tagged_template_string': # This might not be the type for const x = tag`...`
+                          var_info['is_tagged_template'] = True
+                     # Check for tagged template pattern: call_expression with template_string argument
+                     elif value_node.type == 'call_expression': 
+                         # The tree structure is typically call_expression(function=identifier, arguments=template_string)
+                         # or call_expression(function=member_expression, arguments=template_string)
+                         function_node = value_node.child_by_field_name('function')
+                         arguments_node = value_node.child_by_field_name('arguments') # This node contains the template string
+                         
+                         # Check if arguments node itself is a template_string (common tree-sitter structure)
+                         if arguments_node and arguments_node.type == 'template_string':
+                             var_info['is_tagged_template'] = True
+                         # Fallback: Sometimes arguments is a list containing the template string
+                         elif arguments_node and arguments_node.child_count > 0:
+                              first_arg_child = next((c for c in arguments_node.children if c.is_named), None)
+                              if first_arg_child and first_arg_child.type == 'template_string':
+                                  var_info['is_tagged_template'] = True
+
+                extracted.append(var_info)
+
+            elif node_type == 'variable_declarator':
+                name_node = pattern_node.child_by_field_name('name')
+                value_node = pattern_node.child_by_field_name('value')
+
+                if name_node:
+                    # If the name node itself is a pattern, recurse
+                    if name_node.type in ['object_pattern', 'array_pattern']:
+                        pattern_vars = extract_pattern(name_node, value_node)
+                        for var in pattern_vars:
+                             var['is_destructured'] = True # Mark as destructured
+                             var['destructure_type'] = 'object' if name_node.type == 'object_pattern' else 'array'
+                        extracted.extend(pattern_vars)
+                    elif name_node.type == 'identifier':
+                        # Simple variable declaration - extract_pattern handles value checking
+                        pattern_result = extract_pattern(name_node, value_node)
+                        if pattern_result: # Should return one var_info dict
+                            extracted.append(pattern_result[0])
+
+            elif node_type == 'object_pattern':
+                for child in pattern_node.children:
+                    # Handle different pattern types within an object pattern
+                    if child.type == 'pair_pattern': # { key: pattern } or { key: pattern = default }
+                        # Extract the pattern on the value side
+                        value_pattern_node = child.child_by_field_name('value')
+                        key_node = child.child_by_field_name('key') # Original key name
+                        if value_pattern_node:
+                             pattern_vars = extract_pattern(value_pattern_node, value_node) # value_node from original declarator if needed? No, value comes from object.
+                             for var in pattern_vars:
+                                 var['is_destructured'] = True
+                                 var['destructure_type'] = 'object'
+                                 if key_node: var['alias'] = self._get_node_text(key_node, code) # The key acts as the alias source
+                                 # Default value handled within assignment_pattern if present
+                             extracted.extend(pattern_vars)
+
+                    elif child.type == 'shorthand_property_identifier_pattern': # { prop } or { prop = default }
+                        # Pass the shorthand identifier node itself to extract_pattern
+                        extracted.extend(extract_pattern(child, value_node)) # Value comes from object
+
+                    elif child.type == 'rest_pattern': # { ...rest }
+                        # Extract the identifier within the rest pattern
+                         identifier_node = next((c for c in child.children if c.type == 'identifier'), None)
+                         if identifier_node:
+                            pattern_vars = extract_pattern(identifier_node, value_node) # Value from object
+                            for var in pattern_vars:
+                                 var['is_destructured'] = True
+                                 var['destructure_type'] = 'object'
+                                 var['is_rest'] = True
+                            extracted.extend(pattern_vars)
+                            
+                    elif child.type == 'assignment_pattern': # { prop = default } - shorthand default
+                         # Pass the assignment pattern to extract_pattern
+                         extracted.extend(extract_pattern(child, value_node))
+
+
+            elif node_type == 'array_pattern':
+                array_index = 0
+                for child in pattern_node.children:
+                    # Handle elements, skipped elements, and rest pattern
+                    if child.type == ',':
+                         array_index += 1
+                    elif child.type == 'rest_pattern':
+                        identifier_node = next((c for c in child.children if c.type == 'identifier'), None)
+                        if identifier_node:
+                             pattern_vars = extract_pattern(identifier_node, value_node) # Value from array
+                             for var in pattern_vars:
+                                 var['is_destructured'] = True
+                                 var['destructure_type'] = 'array'
+                                 var['is_rest'] = True
+                             extracted.extend(pattern_vars)
+                    elif child.is_named: # Includes identifier, object_pattern, array_pattern, assignment_pattern
+                        pattern_vars = extract_pattern(child, value_node) # Value from array
+                        for var in pattern_vars:
+                            var['is_destructured'] = True
+                            var['destructure_type'] = 'array'
+                            # Assign index if not a rest element (rest handled above)
+                            if not var.get('is_rest', False):
+                                var['array_index'] = array_index
+                        extracted.extend(pattern_vars)
+                        # Increment index only if it wasn't a rest element itself
+                        # Need to reliably check if pattern_vars corresponds to non-rest
+                        is_rest_in_vars = any(v.get('is_rest', False) for v in pattern_vars)
+                        if not is_rest_in_vars:
+                             array_index += 1
+
+
+            # Removed pair_pattern, shorthand_property_identifier_pattern, rest_pattern, assignment_pattern logic
+            # from here as they are handled within the object/array pattern loops by calling extract_pattern recursively.
+
+            # Handling shorthand identifier directly (for { prop } case, called from object_pattern loop)
+            elif node_type == 'shorthand_property_identifier_pattern':
+                 identifier_node = pattern_node
+                 var_info = {
+                    'name': self._get_node_text(identifier_node, code),
                             'type': 'variable',
-                            'line': child.start_point[0] + 1,
-                            'column': child.start_point[1],
-                            'end_line': child.end_point[0] + 1,
-                            'end_column': child.end_point[1]
-                        })
-                        
+                    'line': identifier_node.start_point[0] + 1, 'column': identifier_node.start_point[1],
+                    'end_line': identifier_node.end_point[0] + 1, 'end_column': identifier_node.end_point[1],
+                    'is_destructured': True, # Set by caller (object_pattern loop) but good default
+                    'destructure_type': 'object', # Set by caller
+                    'alias': None, # Shorthand doesn't have alias here
+                    'default_value': None, # Default handled if parent is assignment_pattern
+                    'value': None # Value comes from the source object
+                 }
+                 # Default value handled by assignment_pattern case below if applicable
+                 extracted.append(var_info)
+
+            # Handling assignment pattern (for default values in destructuring)
+            elif node_type == 'assignment_pattern':
+                 left_pattern = pattern_node.child_by_field_name('left')
+                 right_node = pattern_node.child_by_field_name('right') # Default value node
+                 if left_pattern:
+                      # Recursively call extract_pattern on the left side (the actual variable pattern)
+                      pattern_vars = extract_pattern(left_pattern, None) # Don't pass value_node here
+                      default_value_text = self._get_node_text(right_node, code) if right_node else None
+                      for var in pattern_vars:
+                           # The is_destructured/destructure_type flags are set by the containing pattern (object/array)
+                           var['default_value'] = default_value_text
+                      extracted.extend(pattern_vars)
+
+
+            return extracted
+
+        # Iterate through variable declarators in the declaration (e.g., const a = 1, b = 2;)
+        for declarator in node.children:
+            if declarator.type == 'variable_declarator':
+                 variables.extend(extract_pattern(declarator))
+            # Handle cases like 'for (const x of y)' - the pattern is directly under lexical_declaration
+            elif declarator.type in ['object_pattern', 'array_pattern'] and node.type == 'lexical_declaration':
+                 # Don't pass a value_node here, value comes from iteration
+                 pattern_vars = extract_pattern(declarator, None)
+                 for var in pattern_vars:
+                     var['is_destructured'] = True
+                     var['destructure_type'] = 'object' if declarator.type == 'object_pattern' else 'array'
+                 variables.extend(pattern_vars)
+
+                    
         return variables
         
     def _extract_import(self, node: Node, code: Union[str, bytes]) -> Dict:
-        """Extract import information from a node.
-        
-        Args:
-            node: Import statement node
-            code: Original code
-            
-        Returns:
-            Dict: Import information
-        """
+        """Extract import details (names, source)."""
         source_node = node.child_by_field_name('source')
         source = self._get_node_text(source_node, code) if source_node else ""
         
@@ -443,89 +797,275 @@ class JavaScriptParserAdapter(BaseParserAdapter):
             'column': node.start_point[1]
         }
         
-    def _extract_export(self, node: Node, code: Union[str, bytes]) -> Dict:
-        """Extract export information from a node.
-        
+    def _extract_export(self, node: Node, code: Union[str, bytes]) -> Union[Dict, List[Dict]]:
+        """Extract export details based on AST structure.
+
         Args:
-            node: Export statement node
-            code: Original code
+            node: The AST node representing the export statement
+            code: The source code string or bytes
             
         Returns:
-            Dict: Export information
-        """
-        name = None # Initialize name to None
-        is_default = False
-        value_node = None # Node representing the exported value (identifier, class, func)
-        
-        declaration_node = node.child_by_field_name('declaration')
-        
-        if declaration_node:
-            value_node = declaration_node # Exporting a definition
-            if declaration_node.type == 'function_declaration':
-                name_node = declaration_node.child_by_field_name('name')
-                name = self._get_node_text(name_node, code) if name_node else None
-            elif declaration_node.type == 'class_declaration':
-                name_node = declaration_node.child_by_field_name('name')
-                name = self._get_node_text(name_node, code) if name_node else None
-        else:
-            # Check for direct identifier export (e.g., export default MyVar; export { MyVar };)
-            # Iterate children to find 'default' keyword or 'identifier' for default export
-            for child in node.children:
-                if child.type == 'default':
-                    is_default = True
-                elif child.type == 'identifier' and is_default:
-                     # Found 'export default Identifier'
-                     value_node = child
-                     name = self._get_node_text(child, code)
-                     break # Found the default export identifier
-                # Handle export specifiers later if needed (export { name1, name2 })
-
-        # Handle export from source
-        source_node = node.child_by_field_name('source')
-        source = self._get_node_text(source_node, code) if source_node else None
-        
-        # Remove quotes from source
-        if source and (source.startswith('"') and source.endswith('"') or 
-                      source.startswith("'") and source.endswith("'")):
-            source = source[1:-1]
+            A dictionary or list of dictionaries containing export information.
+            For named exports with multiple specifiers, returns a list of export info dicts.
+            For other cases, returns a single export info dict.
             
-        # Get export specifiers
-        specifiers = []
+        The export info dict contains:
+            - type: 'default' | 'named' | 're-export' | 'namespace' | 'direct'
+            - is_default: bool
+            - names: List of exported names with their details
+            - source: Source module for re-exports
+            - namespace: Namespace info for namespace exports
+            - exported_type: Type of the exported entity (function, class, variable)
+            - line, column, end_line, end_column: Location information
+        """
+        # Find key components of the export statement
+        default_keyword = next((child for child in node.children if child.type == 'default'), None)
+        star_keyword = next((child for child in node.children if child.type == '*'), None)
         clause_node = node.child_by_field_name('clause')
-        if clause_node:
-            for child in clause_node.children:
-                if child.type == 'export_specifier':
-                    local_node = child.child_by_field_name('local')
-                    exported_node = child.child_by_field_name('exported')
-                    
-                    local = self._get_node_text(local_node, code) if local_node else ""
-                    exported = self._get_node_text(exported_node, code) if exported_node else local
-                    
-                    specifiers.append({
-                        'local': local,
-                        'exported': exported
-                    })
-                    
-        return {
-            'type': 'export',
-            'name': name, # The name of the exported item, if directly available
-            'source': source,
-            'specifiers': specifiers, # For named exports like export { a, b }
-            'isDefault': is_default, # Explicitly tracked
+        declaration_node = node.child_by_field_name('declaration')
+        source_node = node.child_by_field_name('source')
+        namespace_export_node = next((child for child in node.children if child.type == 'namespace_export'), None)
+
+        # Initialize base export info
+        base_info = {
             'line': node.start_point[0] + 1,
-            'column': node.start_point[1]
+            'column': node.start_point[1],
+            'end_line': node.end_point[0] + 1,
+            'end_column': node.end_point[1],
+            'is_default': False,
+            'names': [],
+            'source': self._get_node_text(source_node, code).strip('\'\"') if source_node else None,
+            'namespace': None,
+            'exported_type': None
         }
+
+        # 1. Default Export: export default ...
+        if default_keyword:
+            return self._handle_default_export(node, code, default_keyword, base_info)
+
+        # 2. Namespace/All Re-export: export * from ... or export * as ns from ...
+        elif star_keyword and source_node:
+            return self._handle_namespace_export(node, code, namespace_export_node, base_info)
+
+        # 3. Named Exports: export { name1, name2 as alias } [from ...]
+        elif clause_node:
+            return self._handle_named_exports(node, code, clause_node, source_node, base_info)
+
+        # 4. Direct Export: export [async] function/class/let/const/var ...
+        elif declaration_node:
+            return self._handle_direct_export(node, code, declaration_node, base_info)
+
+        # 5. Unknown Export Structure
+        else:
+            base_info['type'] = 'unknown'
+            children_types = [child.type for child in node.children]
+            self.logger.warning(
+                f"Unrecognized export statement structure at line {base_info['line']}. "
+                f"Node type: {node.type}, Children types: {children_types}"
+            )
+            base_info['raw_text'] = self._get_node_text(node, code)
+            return base_info
+
+    def _handle_default_export(self, node: Node, code: Union[str, bytes], default_keyword: Node, base_info: Dict) -> Dict:
+        """Handle default export statements."""
+        base_info['type'] = 'default'
+        base_info['is_default'] = True
+        
+        # Find the node being exported (immediately follows 'default')
+            actual_exported_node = None
+            found_default = False
+            for child in node.children:
+            if found_default and child.is_named:
+                    actual_exported_node = child
+                    break
+                if child == default_keyword:
+                    found_default = True
+            
+        if not actual_exported_node:
+            return base_info
+
+        name = "<anonymous>"
+        name_info_node = actual_exported_node
+        exported_type = 'value'
+                
+                if actual_exported_node.type in ('function_declaration', 'class_declaration'):
+            exported_type = 'function' if actual_exported_node.type == 'function_declaration' else 'class'
+            name_node = actual_exported_node.child_by_field_name('name')
+            if name_node:
+                name = self._get_node_text(name_node, code)
+                name_info_node = name_node
+                elif actual_exported_node.type == 'identifier':
+                    name = self._get_node_text(actual_exported_node, code)
+            exported_type = 'identifier'
+        elif actual_exported_node.type in ('number', 'string', 'object', 'array', 'arrow_function'):
+            exported_type = actual_exported_node.type
+            name = self._get_node_text(actual_exported_node, code) if actual_exported_node.type not in ('object', 'array') else 'anonymous'
+            if actual_exported_node.type == 'arrow_function':
+                     name = 'anonymous'
+
+        base_info['exported_type'] = exported_type
+        base_info['names'].append({
+                        'name': name,
+                        'alias': None,
+            'line': name_info_node.start_point[0] + 1,
+            'column': name_info_node.start_point[1],
+            'end_line': name_info_node.end_point[0] + 1,
+            'end_column': name_info_node.end_point[1]
+        })
+        return base_info
+
+    def _handle_namespace_export(self, node: Node, code: Union[str, bytes], namespace_export_node: Optional[Node], base_info: Dict) -> Dict:
+        """Handle namespace and re-export statements."""
+        if namespace_export_node:  # export * as ns from './mod'
+            base_info['type'] = 'namespace'
+            alias_node = namespace_export_node.child_by_field_name('alias')
+            if alias_node:
+                ns_name = self._get_node_text(alias_node, code)
+                base_info['namespace'] = {
+                    'name': ns_name,
+                    'line': alias_node.start_point[0] + 1,
+                    'column': alias_node.start_point[1],
+                    'end_line': alias_node.end_point[0] + 1,
+                    'end_column': alias_node.end_point[1]
+                }
+        else:  # export * from './mod'
+            base_info['type'] = 're-export'
+            base_info['is_namespace'] = True
+        return base_info
+
+    def _handle_named_exports(self, node: Node, code: Union[str, bytes], clause_node: Node, source_node: Optional[Node], base_info: Dict) -> Union[Dict, List[Dict]]:
+        """Handle named exports and re-exports."""
+        current_export_type = 're-export' if source_node else 'named'
+        base_info['type'] = current_export_type
+        exports_list = []
+
+        # Check for default re-export case
+        default_reexport_spec = None
+        specifier_count = 0
+        for spec in clause_node.children:
+            if spec.type == 'export_specifier':
+                specifier_count += 1
+                name_node = spec.child_by_field_name('name')
+                if name_node and self._get_node_text(name_node, code) == 'default':
+                    default_reexport_spec = spec
+
+        is_default_reexport_only = source_node and default_reexport_spec and specifier_count == 1
+
+        if is_default_reexport_only:
+            return self._handle_default_reexport(default_reexport_spec, code, base_info)
+
+        # Process all specifiers
+            for spec in clause_node.children:
+                if spec.type == 'export_specifier':
+                    name_node = spec.child_by_field_name('name')
+                    alias_node = spec.child_by_field_name('alias')
+                    
+                original_name = self._get_node_text(name_node, code) if name_node else None
+                    alias = self._get_node_text(alias_node, code) if alias_node else None
+                exported_as = alias if alias else original_name
+                loc_node = alias_node if alias_node else name_node
+
+                if original_name and loc_node:
+                    single_export = base_info.copy()
+                    single_export['type'] = 're-export' if source_node else 'named'
+                    single_export['is_default_reexport'] = (original_name == 'default' and source_node)
+                    single_export['names'] = [{
+                        'name': exported_as,
+                        'alias': alias,
+                        'original_name': original_name,
+                        'line': loc_node.start_point[0] + 1,
+                        'column': loc_node.start_point[1],
+                        'end_line': loc_node.end_point[0] + 1,
+                        'end_column': loc_node.end_point[1]
+                    }]
+                    exports_list.append(single_export)
+
+        if not exports_list:
+            base_info['type'] = current_export_type
+            return base_info
+        return exports_list if len(exports_list) > 1 else exports_list[0]
+
+    def _handle_default_reexport(self, spec: Node, code: Union[str, bytes], base_info: Dict) -> Dict:
+        """Handle the case of re-exporting only the default export."""
+        alias_node = spec.child_by_field_name('alias')
+        exported_as = self._get_node_text(alias_node, code) if alias_node else 'default'
+        alias = self._get_node_text(alias_node, code) if alias_node else None
+        loc_node = alias_node or spec.child_by_field_name('name')
+
+        single_export = base_info.copy()
+        single_export['type'] = 're-export'
+        single_export['is_default_reexport'] = True
+        single_export['names'] = [{
+            'name': exported_as,
+            'alias': alias,
+            'original_name': 'default',
+            'line': loc_node.start_point[0] + 1,
+            'column': loc_node.start_point[1],
+            'end_line': loc_node.end_point[0] + 1,
+            'end_column': loc_node.end_point[1]
+        }]
+        return single_export
+
+    def _handle_direct_export(self, node: Node, code: Union[str, bytes], declaration_node: Node, base_info: Dict) -> Union[Dict, List[Dict]]:
+        """Handle direct exports of functions, classes, and variables."""
+        base_info['type'] = 'direct'
+        name_node = None
+        name = "<anonymous>"
+
+            if declaration_node.type == 'function_declaration':
+            base_info['exported_type'] = 'function'
+                name_node = declaration_node.child_by_field_name('name')
+            if name_node:
+                name = self._get_node_text(name_node, code)
+            elif declaration_node.type == 'class_declaration':
+            base_info['exported_type'] = 'class'
+                name_node = declaration_node.child_by_field_name('name')
+            if name_node:
+                name = self._get_node_text(name_node, code)
+            elif declaration_node.type in ('lexical_declaration', 'variable_declaration'):
+            base_info['exported_type'] = 'variable'
+            vars_in_decl = self._extract_variables(declaration_node, code)
+            if vars_in_decl:
+                exports_list = []
+                for var_info in vars_in_decl:
+                    single_export = base_info.copy()
+                    single_export['exported_type'] = 'variable'
+                    single_export['names'] = [{
+                        'name': var_info.get('name', '<anonymous>'),  # Ensure name is always present
+                        'alias': None,
+                        'line': var_info.get('line', node.start_point[0] + 1),
+                        'column': var_info.get('column', node.start_point[1]),
+                        'end_line': var_info.get('end_line', node.end_point[0] + 1),
+                        'end_column': var_info.get('end_column', node.end_point[1])
+                    }]
+                    exports_list.append(single_export)
+                return exports_list if len(exports_list) > 1 else exports_list[0]
+
+        # Ensure name is always present in base_info
+            if name_node:
+            base_info['names'].append({
+                    'name': name,
+                    'alias': None,
+                    'line': name_node.start_point[0] + 1,
+                    'column': name_node.start_point[1],
+                    'end_line': name_node.end_point[0] + 1,
+                    'end_column': name_node.end_point[1]
+                })
+        else:
+            # Add a default name if none was found
+            base_info['names'].append({
+                'name': name,
+                'alias': None,
+                'line': node.start_point[0] + 1,
+                'column': node.start_point[1],
+                'end_line': node.end_point[0] + 1,
+                'end_column': node.end_point[1]
+            })
+
+        return base_info
         
     def _get_node_text(self, node: Node, code: Union[str, bytes]) -> str:
-        """Get the text of a node from the original code.
-        
-        Args:
-            node: Node to get text for
-            code: Original code
-            
-        Returns:
-            str: Text of the node
-        """
+        """Safely extract text from a node, decoding if necessary."""
         if not node:
             return ""
             
@@ -568,186 +1108,148 @@ class SwiftParserAdapter(BaseParserAdapter):
     """Parser adapter for Swift code using tree-sitter."""
     
     def __init__(self):
+        """Initialize the Swift parser adapter."""
         super().__init__()
-        self.initialize()
+        # TODO: Implement Swift language loading and parser initialization
+        # self.initialize() 
+        self.logger.warning("Swift parser adapter is not fully implemented.")
         
     def initialize(self):
-        """Initialize the parser and language."""
-        try:
-            # Get the Swift language
-            language_path = str(tree_sitter_swift.__path__[0])
-            
-            # Using tree-sitter 0.24.0, we need to load the language differently
-            language_capsule = tree_sitter_swift.language()
-            self.language = Language(language_capsule)
-            
-            # Initialize the parser with the language
-            self.parser = Parser(self.language)
-            
-            self.logger.info("Swift parser initialized successfully")
-        except Exception as e:
-            self.logger.error(f"Failed to initialize Swift parser: {e}")
-            raise
+        # Placeholder for Swift initialization logic
+        # Needs tree-sitter-swift grammar and library built/loaded
+        # Example (adjust paths as needed):
+        # SWIFT_LANGUAGE_PATH = './build/swift-language.so'
+        # if not os.path.exists(SWIFT_LANGUAGE_PATH):
+        #     Language.build_library(SWIFT_LANGUAGE_PATH, ['./tree-sitter-swift'])
+        # self.language = Language(SWIFT_LANGUAGE_PATH, 'swift')
+        # self.parser = Parser()
+        # self.parser.set_language(self.language)
+        self.language = None
+        self.parser = None
+        self.logger.info("Swift parser initialization skipped (not implemented).")
             
     def parse(self, source_code: Union[str, bytes]) -> Optional[MockTree]:
-        """Parse Swift code and return a mock tree."""
-        attempts = 0
-        last_error = None
-        
-        while attempts < self._error_recovery_attempts:
+        """
+        Parses Swift source code using a mock parser.
+
+        Args:
+            source_code (Union[str, bytes]): The Swift source code to parse.
+
+        Returns:
+            Optional[MockTree]: A mock tree representing the parsed structure, 
+                                or None if parsing fails or is not implemented.
+        """
+        if not self.parser:
+            # Use MockParser if tree-sitter setup failed or is unavailable
+            self.logger.warning("Using MockParser for Swift due to lack of real parser.")
             try:
-                # Check memory usage before parsing
-                self._check_memory_usage()
-                
-                # Convert string to bytes if needed
-                if isinstance(source_code, str):
-                    source_code = source_code.encode('utf-8')
-                    
-                # Parse the code
-                tree = self.parser.parse(source_code)
-                if not tree:
-                    raise ParserError("Failed to parse source code", "parse_error")
-                    
-                # Create mock tree
-                mock_tree = MockTree()
-                
-                # Extract features with caching
-                self._extract_features(tree.root_node, mock_tree)
-                
-                # Check for errors in the tree
-                if tree.root_node.has_error:
-                    self._handle_tree_errors(tree.root_node, mock_tree)
-                
+                from .mock_parser import MockParser # Local import if needed
+                mock_parser = MockParser(language='swift')
+                mock_tree = mock_parser.parse(source_code)
+                # Handle potential errors from mock parser
+                if hasattr(mock_tree, 'errors') and mock_tree.errors:
+                     self.logger.error(f"Mock parsing errors encountered: {mock_tree.errors}")
                 return mock_tree
-                
-            except ParserError as e:
-                last_error = e
-                attempts += 1
-                self._handle_parser_error(e, attempts)
-                
+            except ImportError:
+                 self.logger.error("MockParser not found, cannot parse Swift code.")
+                 return None
             except Exception as e:
-                last_error = ParserError(str(e), "unexpected_error")
-                attempts += 1
-                self._handle_parser_error(last_error, attempts)
-        
-        # If all recovery attempts failed, log the error and return None
-        self.logger.error(f"Failed to parse Swift code after {attempts} attempts: {last_error}")
+                 self.logger.exception(f"Error using MockParser for Swift: {e}")
         return None
         
+        # --- If real tree-sitter parser was initialized (currently skipped) ---
+        # try:
+        #     code_bytes = source_code.encode('utf8') if isinstance(source_code, str) else source_code
+        #     tree = self.parser.parse(code_bytes)
+        #     mock_tree = MockTree() # Convert real tree to mock tree structure
+        #     if tree.root_node:
+        #         mock_tree.root_node = self._tree_sitter_to_mock_node(tree.root_node) # Need this conversion method
+        #         self._handle_tree_errors(tree.root_node, mock_tree)
+        #     return mock_tree
+        # except Exception as e:
+        #     self.logger.exception(f"Error parsing Swift code: {e}")
+        #     return None
+        return None # Should not be reached if parser is initialized
+        
     def _extract_features(self, node: Node, mock_tree: MockTree) -> None:
-        """Extract features with memory optimization and error handling."""
-        try:
-            # Generate feature key for caching
-            feature_key = f"{node.type}_{node.start_point}_{node.end_point}"
-            
-            # Check cache first
-            cached_feature = self._get_cached_feature(feature_key)
-            if cached_feature:
-                feature_type, feature = cached_feature
-                mock_tree.add_feature(feature_type, feature)
+        """Extract features from the Swift parse tree (Placeholder)."""
+        # This method would traverse the tree (real or mock) and populate 
+        # feature lists (functions, classes, imports, etc.) stored perhaps
+        # within the mock_tree object or returned separately.
+        
+        # Example placeholder logic using mock tree:
+        if not mock_tree or not mock_tree.root_node:
                 return
                 
-            # Extract features based on node type
-            if node.type == 'source_file':
-                for child in node.children:
-                    self._extract_features(child, mock_tree)
-                    
-            elif node.type == 'import_declaration':
-                import_info = self._extract_import_info(node)
-                if import_info:
-                    self._cache_feature(feature_key, 'import', import_info)
-                    mock_tree.add_feature('import', import_info)
-                    
-            elif node.type == 'function_declaration':
-                func_info = self._extract_function_info(node)
-                if func_info:
-                    self._cache_feature(feature_key, 'function', func_info)
-                    mock_tree.add_feature('function', func_info)
-                    
-            elif node.type == 'class_declaration':
-                class_info = self._extract_class_info(node)
-                if class_info:
-                    self._cache_feature(feature_key, 'class', class_info)
-                    mock_tree.add_feature('class', class_info)
-                    
-            # Process child nodes
-            for child in node.children:
-                self._extract_features(child, mock_tree)
+        mock_tree.imports = []
+        mock_tree.functions = []
+        mock_tree.classes = []
+        
+        def traverse_mock(mock_node: MockNode):
+            if not mock_node: return
+
+            # Example: Extract based on mock node types (adjust based on MockParser's output)
+            if mock_node.type == 'import_declaration':
+                import_info = self._extract_import_info(mock_node)
+                if import_info: mock_tree.imports.append(import_info)
+            elif mock_node.type == 'function_declaration':
+                func_info = self._extract_function_info(mock_node)
+                if func_info: mock_tree.functions.append(func_info)
+            elif mock_node.type == 'class_declaration':
+                 class_info = self._extract_class_info(mock_node)
+                 if class_info: mock_tree.classes.append(class_info)
+                 
+            for child in mock_node.children:
+                traverse_mock(child)
                 
-        except Exception as e:
-            error = ParserError(str(e), "feature_extraction_error", node)
-            self._handle_parser_error(error, 1)
-            raise
+        traverse_mock(mock_tree.root_node)
+        self.logger.debug(f"Extracted Swift features: Imports={len(mock_tree.imports)}, Functions={len(mock_tree.functions)}, Classes={len(mock_tree.classes)}")
             
     def _extract_import_info(self, node: Node) -> Optional[Dict[str, Any]]:
-        """Extract import information with caching."""
-        node_id = f"import_{node.start_point}_{node.end_point}"
-        cached_node = self._get_cached_node(node_id)
-        if cached_node:
-            return self._process_import_node(cached_node)
-            
-        import_info = self._process_import_node(node)
-        if import_info:
-            self._cache_node(node_id, node)
-        return import_info
+         """Placeholder to extract import info from a Swift node."""
+         # Requires knowledge of Swift grammar node structure
+         # Example: Find the module name child
+         module_name = node.text.split(' ')[-1] # Very basic guess
+         return {'module': module_name, 'line': node.start_point[0] + 1} if module_name else None
         
     def _extract_function_info(self, node: Node) -> Optional[Dict[str, Any]]:
-        """Extract function information with caching."""
-        node_id = f"function_{node.start_point}_{node.end_point}"
-        cached_node = self._get_cached_node(node_id)
-        if cached_node:
-            return self._process_function_node(cached_node)
-            
-        func_info = self._process_function_node(node)
-        if func_info:
-            self._cache_node(node_id, node)
-        return func_info
+         """Placeholder to extract function info from a Swift node."""
+         # Example: Find identifier for name, parameters list
+         name_node = next((c for c in node.children if c.type == 'identifier'), None)
+         name = name_node.text if name_node else None
+         # ... extract params, return type etc. ...
+         return {'name': name, 'line': node.start_point[0] + 1} if name else None
         
     def _extract_class_info(self, node: Node) -> Optional[Dict[str, Any]]:
-        """Extract class information with caching."""
-        node_id = f"class_{node.start_point}_{node.end_point}"
-        cached_node = self._get_cached_node(node_id)
-        if cached_node:
-            return self._process_class_node(cached_node)
-            
-        class_info = self._process_class_node(node)
-        if class_info:
-            self._cache_node(node_id, node)
-        return class_info
+         """Placeholder to extract class info from a Swift node."""
+         name_node = next((c for c in node.children if c.type == 'identifier'), None)
+         name = name_node.text if name_node else None
+         # ... extract inheritance, members etc. ...
+         return {'name': name, 'line': node.start_point[0] + 1} if name else None
+         
+    # --- Placeholder methods for processing specific node types (if using real tree-sitter) ---
+    # These would be similar to the JavaScript ones but use Swift grammar node types/fields
         
     def _process_import_node(self, node: Node) -> Optional[Dict[str, Any]]:
-        """Process an import node and return import information."""
-        path = self._get_field_value(node, 'path')
-        if not path:
-            return None
-            
-        return {
-            'type': 'import',
-            'path': path
-        }
+         """Process a Swift import node (Placeholder)."""
+         self.logger.debug("Processing Swift import node (not implemented).")
+         return None # Replace with actual logic
         
     def _process_function_node(self, node: Node) -> Optional[Dict[str, Any]]:
-        """Process a function node and return function information."""
-        name = self._get_field_value(node, 'name')
-        if not name:
-            name = 'anonymous'
-            
-        # Check for async modifier
-        async_node = self._find_child_by_type(node, 'async')
-        
-        return {
-            'name': name,
-            'type': 'function',
-            'async': bool(async_node)
-        }
+         """Process a Swift function node (Placeholder)."""
+         self.logger.debug("Processing Swift function node (not implemented).")
+         # Example:
+         # name = node.child_by_field_name('name').text.decode('utf8')
+         # params = ...
+         # return {'name': name, ...}
+         return None
         
     def _process_class_node(self, node: Node) -> Optional[Dict[str, Any]]:
-        """Process a class node and return class information."""
-        name = self._get_field_value(node, 'name')
-        if not name:
+         """Process a Swift class node (Placeholder)."""
+         self.logger.debug("Processing Swift class node (not implemented).")
+         # Example:
+         # name = node.child_by_field_name('name').text.decode('utf8')
+         # inheritance = ...
+         # members = ...
+         # return {'name': name, ...}
             return None
-            
-        return {
-            'name': name,
-            'type': 'class'
-        } 

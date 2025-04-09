@@ -2,7 +2,7 @@
 Core MCP Server package.
 """
 
-from .server import server, app
+from .server import create_app
 
 # Import and re-export command execution utils (excluding security functions)
 from ..utils.command_execution import CommandExecutor
@@ -26,8 +26,7 @@ session_lock = threading.Lock()
 active_sessions = {}
 
 __all__ = [
-    "server",
-    "app",
+    "create_app",
     # Security functions/vars
     "is_command_safe",
     "block_command",

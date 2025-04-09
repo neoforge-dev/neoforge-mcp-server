@@ -1,31 +1,38 @@
-# Active Context - Neo MCP Server Refactor
+# Active Context - MCP Refactor
 
-**Current Focus**: Migrate the final server (`NeoDOServer`) to the `BaseServer` architecture.
+## Current Focus
+- Phase 2: BaseServer Migration & Test Coverage (>90% target)
+- Fixing 3 failing tests:
+  1. test_list_sessions (status missing in list_processes)
+  2. test_async_await_support
+  3. test_export_variants
 
-**Current Task**: Start the migration of `NeoDOServer` to use `BaseServer`.
+## Recent Changes
+- All servers migrated to BaseServer
+- Basic health tests passing
+- Fixed NeoDO test mocking/validation
+- Enhanced JS parser (exports, variables)
 
-**Recent Changes / Decisions**:
-*   `NeoLLMServer` migration verified (already used `BaseServer`), security dependencies integrated, and tests updated/passing.
-*   `NeoLocalServer` successfully migrated to `BaseServer`, tests passing.
-*   Resolved issues with API key loading (`ConfigManager`) and validation/permission checks (`SecurityManager`) for config-defined keys.
-*   Overall test coverage remains low (~9%) and below the 9% threshold.
-*   Decided to defer addressing low coverage and warnings until all servers are migrated to `BaseServer`.
+## Next Steps
+1. Fix test_list_sessions (add status)
+2. Address JS parser test failures
+3. Increase test coverage (>90%)
 
-**Next Steps**:
-1.  **Refactor `NeoDOServer`**: Update `server/neodo/server.py` to inherit from `BaseServer`, remove redundant setup, adjust `main` function/factory, integrate security dependencies.
-2.  **Add `NeoDOServer` Basic Tests**: Create `tests/neodo/test_neodo_server.py` with tests for basic initialization and the `/health` endpoint using the factory pattern.
-3.  **Add `NeoDOServer` Placeholder Endpoint Tests**: Add tests for key DO endpoints (e.g., `/droplets`, `/databases`) using valid API keys from config.
-4.  Plan next steps (likely increasing test coverage).
+## Active Decisions
+- Using Pydantic for NeoDO validation
+- Centralized NeoDO mocking
+- JS parser fixes implemented
 
-**Active Considerations / Questions**:
-*   Need to ensure DigitalOcean specific clients/managers in `NeoDOServer` correctly receive the `ServerConfig` object from `BaseServer` during initialization.
-*   Remember to address the `PytestDeprecationWarning` and `Coverage Warning` after migrations.
+## Status
+- BaseServer: Done
+- Server Migration: 4/7 Complete
+- Test Coverage: ~9% (Target: >90%)
 
 # --- Active Context ---
-# Status: Completed NeoOpsServer migration to BaseServer & initial tests passing.
-# Next: Add tests for NeoOpsServer endpoints (placeholder /processes, /resources).
-# Blockers: Low overall test coverage remains a priority.
-# Decisions: Placeholder logic used for LLM/NeoDev/NeoOps tests. Security integration deferred.
+# Status: All servers migrated. Basic tests passing for all servers.
+# Next: Address the 3 known failing tests, starting with test_list_sessions.
+# Blockers: Low overall test coverage (~9%) remains a priority.
+# Decisions: Used Pydantic models for NeoDO request validation. Centralized DO mocking in fixture.
 
 # --- Progress ---
 # BaseServer: Done & Tests Passing.

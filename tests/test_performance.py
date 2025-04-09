@@ -6,10 +6,6 @@ import string
 from statistics import mean, stdev
 from typing import Dict, List, Any
 from fastapi.testclient import TestClient
-from server.core.server import app as core_app
-from server.neod.server import app as neod_app
-from server.neoo.server import app as neoo_app
-from server.neolocal.server import app as neolocal_app
 
 # Performance thresholds (in seconds)
 THRESHOLDS = {
@@ -21,7 +17,10 @@ THRESHOLDS = {
     "concurrent_operations": 0.01,  # 10ms
     "stress_test": 0.05,  # 50ms
     "large_file_operation": 0.02,  # 20ms
-    "multiple_tools": 0.02  # 20ms
+    "multiple_tools": 0.02,  # 20ms
+    "llm_generate": 0.05,  # 50ms
+    "neod_list_files": 0.02, # 20ms (Example)
+    "neoo_list_processes": 0.01 # 10ms (Example)
 }
 
 class PerformanceTest:
@@ -267,4 +266,64 @@ def test_multiple_tools():
     total_time = time.time() - start_time
     
     assert total_time < THRESHOLDS["multiple_tools"], f"Multiple tools execution too slow: {total_time}s"
-    return {"total_time": total_time} 
+    return {"total_time": total_time}
+
+# Test LLM Server Performance
+def test_llm_generate_performance(llm_client: TestClient):
+    """Test the performance of the LLM generate endpoint."""
+    # Get a valid API key from the app config
+    valid_api_key = list(llm_client.app.state.config.api_keys.keys())[0]
+    headers = {"X-API-Key": valid_api_key}
+    
+    request_data = {
+        "prompt": "Write a short poem about a cat.",
+        "model_name": "mock-model-for-perf", # Assuming mock setup
+        "max_tokens": 50
+    }
+    
+    start_time = time.perf_counter()
+    response = llm_client.post("/api/v1/generate", json=request_data, headers=headers)
+    end_time = time.perf_counter()
+    total_time = end_time - start_time
+    
+    assert response.status_code == 200
+    assert total_time < THRESHOLDS["llm_generate"], f"LLM generation too slow: {total_time}s"
+
+# Test NeoDev Server Performance (Example)
+def test_neod_list_files_performance(neod_client: TestClient):
+    """Test the performance of a NeoDev endpoint (e.g., list files)."""
+    # Get a valid API key from the app config
+    valid_api_key = list(neod_client.app.state.config.api_keys.keys())[0]
+    headers = {"X-API-Key": valid_api_key}
+
+    # Assuming an endpoint like /api/v1/files exists
+    # Adjust path and params as needed
+    request_params = {"path": "."} 
+    
+    start_time = time.perf_counter()
+    response = neod_client.get("/api/v1/files", params=request_params, headers=headers)
+    end_time = time.perf_counter()
+    total_time = end_time - start_time
+    
+    assert response.status_code == 200 # Assuming endpoint exists and works
+    assert total_time < THRESHOLDS["neod_list_files"], f"NeoDev list files too slow: {total_time}s"
+
+# Test NeoOps Server Performance (Example)
+def test_neoo_list_processes_performance(neoo_client: TestClient):
+    """Test the performance of the NeoOps list processes endpoint."""
+    valid_api_key = list(neoo_client.app.state.config.api_keys.keys())[0]
+    headers = {"X-API-Key": valid_api_key}
+
+    start_time = time.perf_counter()
+    response = neoo_client.get("/api/v1/processes", headers=headers)
+    end_time = time.perf_counter()
+    total_time = end_time - start_time
+    
+    assert response.status_code == 200
+    assert total_time < THRESHOLDS["neoo_list_processes"], f"NeoOps list processes too slow: {total_time}s"
+
+# TODO: Add more performance tests for other servers/endpoints as needed
+# For example, NeoOps resource monitoring, etc.
+
+# Note: Consider using a dedicated performance testing framework like Locust
+# for more comprehensive load testing in the future. 
