@@ -49,3 +49,8 @@ log_retention: 7
 # Debug settings
 debug: false
 reload: false
+
+# Rate limiting settings
+enable_rate_limiting: true
+default_rate_limit: "100/minute"
+# SSL settings

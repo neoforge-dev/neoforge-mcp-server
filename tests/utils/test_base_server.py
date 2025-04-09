@@ -7,8 +7,10 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from server.utils.base_server import BaseServer
-from server.utils.config import ServerConfig
+from server.utils.base_server import BaseServer, limiter
+from server.utils.config import ServerConfig, ConfigManager
+from server.utils.security import ApiKey
+import time
 
 # --- Fixtures ---
 
@@ -28,51 +30,44 @@ def mock_config():
     )
 
 @pytest.fixture
-def concrete_server(mock_config):
-    # Patch dependencies including ConfigManager.load_config
-    with patch('server.utils.logging.LogManager') as MockLogManager, \
-         patch('server.utils.base_server.MonitoringManager') as MockMonitoringManager, \
-         patch('server.utils.base_server.SecurityManager') as MockSecurity, \
-         patch('server.utils.config.ConfigManager.load_config') as MockLoadConfig:
-
-        # Configure mocks
-        MockLoadConfig.return_value = mock_config # Return the fixture's config
-        mock_logger_instance = MagicMock(spec=logging.Logger)
-        MockLogManager.return_value.get_logger.return_value = mock_logger_instance
-        mock_monitor_instance = MagicMock()
-        MockMonitoringManager.return_value = mock_monitor_instance
-        mock_security_instance = MagicMock()
-        MockSecurity.return_value = mock_security_instance
-
-        class ConcreteServer(BaseServer):
-            def __init__(self):
-                # Only pass app_name, BaseServer loads config via mocked load_config
-                super().__init__(app_name=mock_config.name)
-
-            def _setup_routes(self):
-                @self.app.get("/dummy")
-                async def dummy_route():
-                    return {"message": "dummy"}
-
-        server = ConcreteServer()
-        # Verify load_config was called correctly by BaseServer.__init__
-        MockLoadConfig.assert_called_once_with(mock_config.name)
-        # Add mocks if needed
-        server._test_mocks = {
-            "logger": mock_logger_instance,
-            "monitor": mock_monitor_instance,
-            "security": mock_security_instance,
-            "LogManager": MockLogManager,
-            "MonitoringManager": MockMonitoringManager,
-            "SecurityManager": MockSecurity,
-            "LoadConfig": MockLoadConfig
-        }
-        return server
+def concrete_server(mock_dependencies): # Use centralized mocks
+    server = BaseServer(app_name="concrete_test_server")
+    server._test_mocks = mock_dependencies # Attach mocks for inspection
+    return server
 
 @pytest.fixture
-def client(concrete_server):
-    # Provides a TestClient for the concrete server instance
+def client_concrete(concrete_server):
+    """Provides a TestClient for the concrete BaseServer instance."""
     return TestClient(concrete_server.app)
+
+# Fixture specific for rate limit tests
+@pytest.fixture
+def test_base_server_rate_limit(mock_dependencies): # Depends on conftest fixture
+    """Creates an instance of BaseServer with mocked dependencies for rate limit tests."""
+    # Enable rate limiting specifically for these tests via config
+    mock_dependencies["config"].enable_rate_limiting = True
+    mock_dependencies["config"].default_rate_limit = "5/second" # Set a testable limit
+
+    # Create a NEW limiter instance for this test scope to avoid state pollution
+    test_limiter = Limiter(key_func=get_remote_address, enabled=True)
+    with patch('server.utils.base_server.limiter', new=test_limiter)
+         patch.dict(test_limiter._limits, {}, clear=True): # Clear limits for this specific instance
+        
+        # Instantiate the server using the mocked dependencies
+        server = BaseServer(app_name="test_base_server_rate_limit")
+        # Ensure the server's app uses the test_limiter instance
+        server.app.state.limiter = test_limiter
+
+        # Attach mocks to the server instance if needed for assertions
+        server._test_mocks = mock_dependencies
+        yield server
+
+    # No need to disable global limiter as we used a local one
+
+@pytest.fixture
+def client_rate_limit(test_base_server_rate_limit):
+    """Provides a TestClient for the rate-limit-specific BaseServer instance."""
+    return TestClient(test_base_server_rate_limit.app)
 
 # --- Test Cases ---
 
@@ -136,9 +131,9 @@ def test_initialization(mock_config):
 # TODO: Add test for config loading (if BaseServer handles it directly)
 # TODO: Add test for initialization failure (e.g., invalid config)
 
-def test_health_endpoint(client, concrete_server):
+def test_health_endpoint(client_concrete, concrete_server):
     # Test the /health endpoint
-    response = client.get("/health")
+    response = client_concrete.get("/health")
     assert response.status_code == 200
     # Get expected values from the server's config (which should be the mocked one)
     expected_config = concrete_server.config
@@ -171,4 +166,39 @@ def test_middleware_presence(concrete_server):
 
 # TODO: Test middleware functionality (e.g., logging, error handling, security)
 # TODO: Test server shutdown sequence (if applicable)
-# TODO: Test integration points (Monitor calls, Security checks in routes - requires routes) 
+# TODO: Test integration points (Monitor calls, Security checks in routes - requires routes)
+
+def test_base_models_endpoint(client_concrete, concrete_server):
+    """Test the placeholder /api/v1/models endpoint."""
+    api_key = list(concrete_server.config.api_keys.keys())[0]
+    headers = {"X-API-Key": api_key}
+    response = client_concrete.get("/api/v1/models", headers=headers)
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+    assert len(response.json()) > 0 # Check it returns something
+
+def test_rate_limit_exceeded(client_rate_limit, test_base_server_rate_limit):
+    """Test that requests are blocked when rate limit is exceeded."""
+    api_key = list(test_base_server_rate_limit.config.api_keys.keys())[0]
+    headers = {"X-API-Key": api_key}
+    limit_str = test_base_server_rate_limit.config.default_rate_limit # e.g., "5/second"
+    limit, _ = limit_str.split('/')
+    limit_count = int(limit)
+
+    # Make requests up to the limit - should succeed
+    for _ in range(limit_count):
+        response = client_rate_limit.get("/api/v1/models", headers=headers)
+        assert response.status_code == 200
+
+    # Make one more request - should fail with 429
+    response = client_rate_limit.get("/api/v1/models", headers=headers)
+    assert response.status_code == 429
+    assert "Rate limit exceeded" in response.text
+    assert "Retry-After" in response.headers
+
+    # Wait for the window to reset (add a small buffer)
+    time.sleep(1.1)
+
+    # Make another request - should succeed now
+    response = client_rate_limit.get("/api/v1/models", headers=headers)
+    assert response.status_code == 200

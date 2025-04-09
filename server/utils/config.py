@@ -69,7 +69,7 @@ class ServerConfig:
         enable_sessions: bool = False,
         session_secret: Optional[str] = None,
         # Monitoring settings
-        enable_metrics: bool = True,
+        enable_metrics: bool = False,
         metrics_port: int = 9090,
         enable_health_checks: bool = True,
         health_check_interval: int = 30,
@@ -86,8 +86,7 @@ class ServerConfig:
         cache_ttl: int = 3600,
         # Rate limiting
         enable_rate_limiting: bool = True,
-        rate_limit: int = 100,
-        rate_limit_window: int = 60,
+        default_rate_limit: str = "100/minute",
         # SSL/TLS settings
         enable_ssl: bool = False,
         ssl_cert: Optional[str] = None,
@@ -138,7 +137,7 @@ class ServerConfig:
         enable_resource_monitoring: bool = False,
         enable_system_commands: bool = False,
         enable_network_operations: bool = False,
-        enable_backup_operations: bool = False
+        enable_backup_operations: bool = False,
     ):
         """Initialize server configuration."""
         self.name = name
@@ -227,8 +226,7 @@ class ServerConfig:
         
         # Rate limiting
         self.enable_rate_limiting = enable_rate_limiting
-        self.rate_limit = rate_limit
-        self.rate_limit_window = rate_limit_window
+        self.default_rate_limit = default_rate_limit
         
         # SSL/TLS settings
         self.enable_ssl = enable_ssl

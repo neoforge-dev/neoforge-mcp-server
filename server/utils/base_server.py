@@ -1,7 +1,7 @@
 """Base server class for all server implementations."""
 
 from typing import Any, Dict, Optional, List
-from fastapi import FastAPI, Request, Response, HTTPException, Security
+from fastapi import FastAPI, Request, Response, HTTPException, Security, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -11,6 +11,12 @@ from starlette.middleware.sessions import SessionMiddleware
 import time
 import uuid
 
+# Rate Limiting imports
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
 from .config import ConfigManager, ServerConfig
 from .logging import LogManager
 from .monitoring import MonitoringManager
@@ -19,6 +25,10 @@ from .error_handling import (
     MCPError, ValidationError, AuthenticationError, AuthorizationError,
     NotFoundError, ConflictError, ErrorHandlerMiddleware, handle_exceptions
 )
+
+# Initialize Rate Limiter
+# Use IP address as the key function
+limiter = Limiter(key_func=get_remote_address)
 
 # API key header
 api_key_header = APIKeyHeader(name="X-API-Key")
@@ -122,6 +132,11 @@ class BaseServer:
             redoc_url=None  # Will be set based on config
         )
         
+        # Add rate limiter state to app
+        self.app.state.limiter = limiter
+        # Add rate limit exceeded handler
+        self.app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+        
         # Initialize managers
         self._init_managers(app_name)
         
@@ -207,8 +222,13 @@ class BaseServer:
                 session_cookie="session",
                 max_age=3600
             )
-            
-        # Add state middleware
+        
+        # Add SlowAPI middleware LAST (after error handling, state, etc.)
+        if self.config.enable_rate_limiting:
+            self.logger.info(f"Enabling rate limiting: {self.config.default_rate_limit}")
+            self.app.add_middleware(SlowAPIMiddleware)
+        
+        # Add state middleware (needed by rate limiter key func if custom logic used)
         @self.app.middleware("http")
         async def add_state(request: Request, call_next):
             """Add state to request."""
@@ -231,7 +251,8 @@ class BaseServer:
             
         @self.app.get("/health")
         @handle_exceptions()
-        async def health_check() -> Dict[str, Any]:
+        @limiter.limit("10/second")
+        async def health_check(request: Request) -> Dict[str, Any]:
             """Health check endpoint."""
             if not self.config.enable_health_checks:
                 return {"status": "disabled"}
@@ -249,6 +270,17 @@ class BaseServer:
                     "tracing": self.config.enable_tracing
                 }
             }
+            
+        @self.app.get("/api/v1/models", tags=["Base"])
+        @handle_exceptions()
+        @limiter.limit("100/minute")
+        async def list_models(
+            request: Request,
+            api_key: ApiKey = Depends(self.get_api_key)
+        ) -> List[Dict[str, Any]]:
+            """List available models (placeholder for demonstration)."""
+            self.security.check_permission(api_key, "read")
+            return [{"name": "model1", "type": "llm"}, {"name": "model2", "type": "embedding"}]
             
     async def get_api_key(self, api_key: str = Security(api_key_header)) -> ApiKey:
         """Validate API key and return key info.

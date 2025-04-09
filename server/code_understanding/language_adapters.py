@@ -113,6 +113,58 @@ class BaseParserAdapter:
             # Pass tree and code_bytes down
             self._handle_tree_errors(child, tree, code_bytes)
 
+        # Check for super() call within the method body
+        # Known Limitation: super() call detection removed due to instability.
+        # method_info['calls_super'] = False
+        body_node = node.child_by_field_name('body')
+        if body_node:
+            # Simplified Super() Call Check
+            queue = [body_node]
+            found_super = False
+            while queue and not found_super:
+                current = queue.pop(0)
+                # Look for a call expression whose function is the 'super' keyword
+                if current.type == 'call_expression':
+                    func_node = current.child_by_field_name('function') 
+                    if func_node and func_node.type == 'super':
+                         found_super = True
+                # Traverse children only if super hasn't been found
+                if not found_super:
+                    queue.extend(current.children)
+            # method_info['calls_super'] = found_super
+            # --- End Simplified Check ---
+            
+            # --- Debug: Print nodes inside constructor body ---
+            if method_info.get('name') == 'constructor':
+                self.logger.debug(f"--- Constructor Body Nodes (Line {method_info.get('line')}) ---")
+                queue = [body_node]
+                while queue:
+                    current = queue.pop(0)
+                    self.logger.debug(f"Node: {current.type} {current.start_point}-{current.end_point} Text: {self._get_node_text(current, code_bytes)}")
+                    # Print children types for context
+                    children_types = [c.type for c in current.children]
+                    if children_types:
+                        self.logger.debug(f"  Children: {children_types}")
+                    # Print specific fields if relevant (e.g., for call_expression)
+                    if current.type == 'call_expression':
+                         func_node = current.child_by_field_name('function')
+                         args_node = current.child_by_field_name('arguments')
+                         self.logger.debug(f"  Call Func: {func_node.type if func_node else 'N/A'}, Args: {args_node.type if args_node else 'N/A'}")
+                    queue.extend(current.children)
+                self.logger.debug(f"--- End Constructor Body Nodes ---")
+            # --- End Debug ---
+
+        # Check for try-catch blocks
+        has_try_catch = False
+        body_node = node.child_by_field_name('body')
+        if body_node:
+            body_text = self._get_node_text(body_node, code_bytes)
+            has_try_catch = 'try' in body_text and 'catch' in body_text
+        
+        method_info['has_try_catch'] = has_try_catch
+
+        return method_info
+
 class JavaScriptParserAdapter(BaseParserAdapter):
     """Parser adapter for JavaScript code using tree-sitter."""
     
@@ -198,79 +250,32 @@ class JavaScriptParserAdapter(BaseParserAdapter):
             code_bytes = code
             
         # Parse the code
+        tree = None # Initialize tree
         try:
             self._check_memory_usage()
             tree = self.parser.parse(code_bytes)
-
-            # Check for syntax errors
-            if tree.root_node.has_error:
-                self.logger.warning("Syntax errors found in JavaScript code")
-                # Pass code_bytes if needed by error handler
-                self._handle_tree_errors(tree.root_node, tree, code_bytes)
+            
+            # --- Removed error handling from parse --- 
+            # No longer trying to attach errors to the tree here
+            # Error checking will happen in analyze based on tree.root_node.has_error
+            
+            # Original error checking block:
+            # if not hasattr(tree, 'errors'):
+            #      tree.errors = [] 
+            # if tree.root_node.has_error:
+            #     self.logger.warning("Syntax errors found in JavaScript code")
+            #     # Pass code_bytes if needed by error handler
+            #     # self._handle_tree_errors(tree.root_node, tree, code_bytes) # Removed call
 
             return tree # Return the actual tree-sitter tree
         except Exception as e:
-            self.logger.exception(f"Failed to parse JavaScript: {e}")
-            # Re-raise or raise a specific parsing error
+            # Log parsing errors but don't try to attach to tree
+            self.logger.exception(f"Core JavaScript parsing failed: {e}")
+            # Return the potentially incomplete/error tree if available, or None
+            # The analyze method will check tree and tree.root_node.has_error
+            # Raise ValueError to indicate parsing failure
             raise ValueError(f"JavaScript parsing failed: {e}") from e
             
-    def _tree_sitter_to_mock_node(self, node: Node) -> MockNode:
-        """Convert a tree-sitter node to a MockNode.
-        
-        Args:
-            node: Tree-sitter node
-            
-        Returns:
-            MockNode: Converted mock node
-        """
-        if not node:
-            return None
-            
-        # Convert the text to string if it's bytes
-        if hasattr(node, 'text'):
-            if isinstance(node.text, bytes):
-                text = node.text.decode('utf8')
-            else:
-                text = str(node.text)
-        else:
-            text = ""
-            
-        # Create the mock node
-        mock_node = MockNode(
-            type=node.type,
-            text=text,
-            start_point=node.start_point,
-            end_point=node.end_point,
-            children=[],
-            fields={}
-        )
-        
-        # Process children
-        for child in node.children:
-            child_mock = self._tree_sitter_to_mock_node(child)
-            if child_mock:
-                mock_node.children.append(child_mock)
-                child_mock.parent = mock_node
-                
-        # Process named fields (using API compatible with tree-sitter ~0.20+)
-        # NOTE: This assumes field names are known or need to be handled differently.
-        # If specific field names need to be processed, they should be accessed directly.
-        # For a generic approach, iterating named_children might be needed, 
-        # but mapping them back to field names is complex without grammar knowledge.
-        # This example simplifies by omitting the generic field processing loop
-        # If specific fields ARE needed, they must be added explicitly like:
-        # try:
-        #     name_field = node.child_by_field_name('name')
-        #     if name_field:
-        #         mock_node.fields['name'] = self._tree_sitter_to_mock_node(name_field)
-        # except Exception:
-        #     pass # Field might not exist
-            
-        # Clear the fields dict for now as the old method is incompatible
-        mock_node.fields = {} 
-
-        return mock_node
-        
     def analyze(self, code: Union[str, bytes]) -> Dict[str, List[Dict]]:
         """Parse the code and extract features.
         
@@ -287,33 +292,105 @@ class JavaScriptParserAdapter(BaseParserAdapter):
         if not self.parser:
             raise RuntimeError("JavaScript parser not initialized.")
             
+        # --- Ensure we work with bytes consistently ---
+        if isinstance(code, str):
+             code_bytes = code.encode('utf-8')
+        else:
+             code_bytes = code
+        # --- End Bytes Consistency ---
+            
         try:
-            tree = self.parse(code)
+            # Pass code_bytes to parse
+            tree = self.parse(code_bytes) 
             if not tree or not tree.root_node:
                 raise ValueError("Parsing resulted in an empty tree.")
                 
-            # Use the internal feature extraction method
-            features = self._extract_features(tree.root_node, code)
+            # Use the internal feature extraction method, passing code_bytes
+            features = self._extract_features(tree.root_node, code_bytes)
 
-            # Check for syntax errors
+            # --- Corrected Syntax Error Handling ---
             errors = []
-            if hasattr(tree, 'errors'):
-                errors.extend(tree.errors)
             if tree.root_node.has_error:
-                self._handle_tree_errors(tree.root_node, tree, code)
-                if hasattr(tree, 'errors'):
-                    errors.extend(tree.errors)
-
-            # Add error information to the features
-            if errors:
-                features['has_errors'] = True
-                features['errors'] = errors
+                 self.logger.warning("Syntax errors detected in the tree by tree-sitter.")
+                 # --- Set has_errors flag based on the fundamental tree signal ---
+                 features['has_errors'] = True 
+                 # --- End Flag Setting ---
+                 # Call the method to collect specific errors (might return empty list)
+                 errors = self._collect_syntax_errors(tree.root_node, code_bytes)
+                 # Assign collected errors, even if empty
+                 features['errors'] = errors 
+                 # Original/Problematic logic:
+                 # if errors:
+                 #      features['has_errors'] = True # Only set if specific errors found
+                 #      features['errors'] = errors
+            # --- End Correction ---
 
             return features
+        except ValueError as e:
+             # Handle parsing failures specifically raised from self.parse()
+             self.logger.error(f"JavaScript analysis could not proceed due to parsing failure: {e}")
+             # Return minimal features indicating the error
+             return {
+                 'functions': [], 'classes': [], 'variables': [], 'imports': [], 'exports': [],
+                 'has_errors': True,
+                 'errors': [{'message': f"Parsing Failed: {e}"}], 
+             }
         except Exception as e:
-            self.logger.exception(f"JavaScript analysis failed: {e}")
-            # Re-raise to ensure the caller knows analysis failed
+            self.logger.exception(f"JavaScript analysis failed unexpectedly: {e}")
+            # Re-raise to ensure the caller knows analysis failed critically
             raise
+
+    def _collect_syntax_errors(self, node: Node, code_bytes: bytes) -> List[Dict]:
+         """Recursively find explicitly marked ERROR nodes or missing nodes.
+         Does not modify the tree object.
+         """
+         errors = []
+         # Simplified recursive approach focusing on ERROR/missing nodes
+         def find_errors_recursive(current_node: Node):
+              if current_node.type == 'ERROR' or current_node.is_missing:
+                   # Extract error details
+                   start_line, start_col = current_node.start_point
+                   end_line, end_col = current_node.end_point
+                   # Ensure code_bytes is bytes before slicing/decoding
+                   context_bytes = b''
+                   if isinstance(code_bytes, bytes):
+                       context_bytes = code_bytes[current_node.start_byte:current_node.end_byte]
+                   else:
+                        # This case should ideally not happen if analyze passes bytes
+                        self.logger.error("_collect_syntax_errors received non-bytes unexpectedly")
+                        # Attempt conversion as a fallback, may fail
+                        try:
+                             temp_bytes = str(code_bytes).encode('utf-8')
+                             context_bytes = temp_bytes[current_node.start_byte:current_node.end_byte]
+                        except Exception:
+                            pass # Leave context_bytes empty
+                           
+                   error_text = context_bytes.decode('utf-8', errors='replace')
+
+                   error_type = "Syntax Error"
+                   if current_node.is_missing:
+                        error_type = "Missing Node"
+                   elif current_node.type == 'ERROR':
+                        error_type = "Parse Error Node"
+                       
+                   error_info = {
+                        'message': f"{error_type} near '{error_text[:50]}...'" if len(error_text) > 50 else f"{error_type} near '{error_text}'",
+                        'type': error_type,
+                        'line': start_line + 1,
+                        'column': start_col,
+                        'end_line': end_line + 1,
+                        'end_column': end_col,
+                        'context': error_text
+                   }
+                   errors.append(error_info)
+                   self.logger.debug(f"Collected syntax error detail: {error_info}")
+
+              # Recurse into children
+              for child in current_node.children:
+                   find_errors_recursive(child)
+
+         find_errors_recursive(node) # Start recursion
+         return errors
             
     def _extract_features(self, node: Node, code: Union[str, bytes]) -> Dict[str, List[Dict]]:
         features = {
@@ -345,18 +422,59 @@ class JavaScriptParserAdapter(BaseParserAdapter):
                 if parent_node and parent_node.type == 'variable_declarator':
                     name_node = parent_node.child_by_field_name('name')
                     if name_node: name = self._get_node_text(name_node, code)
-                    # Check siblings of the arrow function within the variable declarator for 'async'
-                    if parent_node.child_count > 1 and parent_node.children[0].type == 'async':
-                         is_async_arrow = True
-                    # Also check if 'async' is directly before the declarator 
-                    grandparent_node = parent_map.get(parent_node)
-                    if grandparent_node and grandparent_node.type == 'lexical_declaration':
-                         if grandparent_node.children[0].type == 'async':
-                              is_async_arrow = True
-                         elif len(grandparent_node.children) > 1 and grandparent_node.children[1].type == 'async': # e.g. export async const ...
-                              is_async_arrow = True
-                
-                func_info = self._extract_arrow_function(current_node, code, name, is_async_arrow)
+                    # CORRECTED: Check children of the arrow function node itself for 'async'
+                    is_async_arrow = any(child.type == 'async' for child in current_node.children)
+
+                # --- Integrated Arrow Function Extraction ---
+                params = []
+                params_node = current_node.child_by_field_name('parameters')
+                # Handle cases where parameters might be a single identifier (e.g., x => x * 2)
+                if current_node.child_by_field_name('parameter'):
+                    param_node = current_node.child_by_field_name('parameter')
+                    if param_node.type == 'identifier':
+                         params.append(self._get_node_text(param_node, code))
+                elif params_node: # Handle formal_parameters node
+                     for child in params_node.children:
+                         # Extract various parameter types correctly
+                         if child.type == 'identifier':
+                             params.append(self._get_node_text(child, code))
+                         elif child.type == 'rest_pattern':
+                              # Find identifier within rest_pattern
+                              ident_node = next((sub_child for sub_child in child.children if sub_child.type == 'identifier'), None)
+                              if ident_node:
+                                   params.append(f"...{self._get_node_text(ident_node, code)}")
+                         elif child.type in ('object_pattern', 'array_pattern'):
+                              # Represent destructured params textually for now
+                              params.append(self._get_node_text(child, code))
+                         elif child.type == 'required_parameter': # Handle required_parameter wrapper
+                             inner_pattern = child.child_by_field_name('pattern')
+                             if inner_pattern:
+                                 params.append(self._get_node_text(inner_pattern, code))
+
+
+                has_try_catch = False
+                body_node = current_node.child_by_field_name('body')
+                if body_node:
+                    # Simple check, might need refinement for nested try-catch
+                    body_text = self._get_node_text(body_node, code)
+                    has_try_catch = 'try' in body_text and 'catch' in body_text
+
+                func_info = {
+                    'name': name,
+                    'type': 'function', # Still categorize as 'function' broadly
+                    'is_async': is_async_arrow,
+                    'is_arrow': True, # Mark specifically as arrow
+                    'parameters': params,
+                    'has_try_catch': has_try_catch,
+                    'has_destructured_params': False,
+                    'line': current_node.start_point[0] + 1,
+                    'column': current_node.start_point[1],
+                    'end_line': current_node.end_point[0] + 1,
+                    'end_column': current_node.end_point[1]
+                }
+                # --- End Integrated Extraction ---
+
+                # func_info = self._extract_arrow_function(current_node, code, name, is_async_arrow) # Removed call to non-existent func
                 if func_info: features['functions'].append(func_info)
             elif current_node.type == 'class_declaration':
                 class_info = self._extract_class(current_node, code)
@@ -442,23 +560,79 @@ class JavaScriptParserAdapter(BaseParserAdapter):
         
     def _extract_function(self, node: Node, code: Union[str, bytes]) -> Dict:
         """Extract function details (name, parameters, async status)."""
+        # Initialize func_info dict
+        func_info = {
+            'name': None,
+            'type': 'function',
+            'is_async': False,
+            'is_arrow': False,
+            'parameters': [],
+            'has_try_catch': False,
+            'has_destructured_params': False,
+            'line': node.start_point[0] + 1,
+            'column': node.start_point[1],
+            'end_line': node.end_point[0] + 1,
+            'end_column': node.end_point[1]
+        }
+
         name_node = node.child_by_field_name('name')
-        name = self._get_node_text(name_node, code) if name_node else "<anonymous>"
+        func_info['name'] = self._get_node_text(name_node, code) if name_node else "<anonymous>"
         
         # Check for async modifier
         is_async = any(child.type == 'async' for child in node.children)
         
-        # Extract parameters
+        # Extract parameters & Check for destructuring
         params = []
+        has_destructured = False
         params_node = node.child_by_field_name('parameters')
         if params_node:
-            for child in params_node.children:
-                if child.type == 'identifier':
-                    params.append(self._get_node_text(child, code))
-                elif child.type == 'rest_parameter':
-                    param_name = self._get_node_text(child, code)
-                    params.append(f"...{param_name}")
-        
+            # --- Refined Destructuring Check ---
+            for child in params_node.named_children: # Use named_children for more reliability
+                param_text = self._get_node_text(child, code)
+                # Check the type of the parameter pattern node
+                pattern_node = child # Default if no specific pattern wrapper
+                if child.type == 'required_parameter':
+                     pattern_node = child.child_by_field_name('pattern')
+                elif child.type == 'optional_parameter':
+                     pattern_node = child.child_by_field_name('pattern')
+
+                if pattern_node:
+                    param_text = self._get_node_text(pattern_node, code) # Get text from actual pattern
+                    if pattern_node.type in ('object_pattern', 'array_pattern'):
+                        has_destructured = True
+                    elif pattern_node.type == 'rest_pattern':
+                         # Handle rest pattern text representation
+                         ident_node = next((sub for sub in pattern_node.children if sub.type == 'identifier'), None)
+                         if ident_node:
+                              param_text = f"...{self._get_node_text(ident_node, code)}"
+                         else:
+                              param_text = f"...{param_text}"
+                    # Add the potentially refined param_text
+                    params.append(param_text)
+                else:
+                     params.append(self._get_node_text(child, code))
+            # --- End Refined Check ---
+
+            # Original loop:
+            # for child in params_node.children:
+            #     param_text = self._get_node_text(child, code)
+            #     params.append(param_text)
+            #     if child.type in ('object_pattern', 'array_pattern'):
+            #         has_destructured = True
+            #     elif child.type == 'rest_parameter':
+            #          # Tree-sitter often includes the '...' in the text for rest_parameter
+            #          # If not, prepend it.
+            #          if not param_text.startswith('...'):
+            #               # Find the identifier within the rest_parameter if needed
+            #               ident_node = next((sub for sub in child.children if sub.type == 'identifier'), None)
+            #               if ident_node:
+            #                    params[-1] = f"...{self._get_node_text(ident_node, code)}"
+            #               else:
+            #                    params[-1] = f"...{param_text}" # Fallback
+
+        func_info['parameters'] = params
+        func_info['has_destructured_params'] = has_destructured
+
         # Check for arrow function
         is_arrow = node.type == 'arrow_function'
         
@@ -469,18 +643,11 @@ class JavaScriptParserAdapter(BaseParserAdapter):
             body_text = self._get_node_text(body_node, code)
             has_try_catch = 'try' in body_text and 'catch' in body_text
         
-        return {
-            'name': name,
-            'type': 'function',
-            'is_async': is_async,
-            'is_arrow': is_arrow,
-            'parameters': params,
-            'has_try_catch': has_try_catch,
-            'line': node.start_point[0] + 1,
-            'column': node.start_point[1],
-            'end_line': node.end_point[0] + 1,
-            'end_column': node.end_point[1]
-        }
+        func_info['is_async'] = is_async
+        func_info['is_arrow'] = is_arrow
+        func_info['has_try_catch'] = has_try_catch
+
+        return func_info
         
     def _extract_class(self, node: Node, code: Union[str, bytes]) -> Dict:
         """Extract class information with support for private fields and methods."""
@@ -531,10 +698,13 @@ class JavaScriptParserAdapter(BaseParserAdapter):
                             class_info['methods'].append(method_info)
                 elif child.type == 'field_definition':
                     field_info = self._extract_field(child, code)
-                    if field_info['name'].startswith('#'):
-                        class_info['private_fields'].append(field_info)
-                    else:
-                        class_info['fields'].append(field_info)
+                    if field_info and field_info.get('name'):
+                        if field_info['name'].startswith('#'):
+                            class_info['private_fields'].append(field_info)
+                        else:
+                            class_info['fields'].append(field_info)
+                    elif field_info:
+                        self.logger.warning(f"Field definition at line {field_info.get('line')} is missing a name.")
         
         return class_info
 
@@ -548,34 +718,92 @@ class JavaScriptParserAdapter(BaseParserAdapter):
             'is_static': False,
             'is_async': False,
             'is_generator': False,
+            'is_getter': False,
+            'is_setter': False,
+            # Known Limitation: super() call detection removed due to instability.
+            # 'calls_super': False,
             'line': node.start_point[0] + 1,
             'column': node.start_point[1],
             'end_line': node.end_point[0] + 1,
             'end_column': node.end_point[1],
             'body_start_line': None,
             'body_end_line': None,
+            'has_destructured_params': False
         }
 
-        # Check for modifiers
-        for child in node.children:
-            if child.type == 'static':
-                method_info['is_static'] = True
-            elif child.type == 'async':
-                method_info['is_async'] = True
-            elif child.type == '*': # Generator indicator
-                method_info['is_generator'] = True
+        # Check for modifiers like get/set/static/async/* within the method node itself
+        # These are often direct children or specific markers
+        keywords = {child.type for child in node.children if not child.is_named} # Check unnamed children like keywords
+        method_info['is_static'] = 'static' in keywords
+        method_info['is_async'] = 'async' in keywords
+        method_info['is_generator'] = '*' in keywords
+        method_info['is_getter'] = 'get' in keywords
+        method_info['is_setter'] = 'set' in keywords
 
-        # Get method name
+        # Original modifier checks - less reliable as keywords aren't always top-level children
+        # for child in node.children:
+        #     if child.type == 'static':
+        #         method_info['is_static'] = True
+        #     elif child.type == 'async':
+        #         method_info['is_async'] = True
+        #     elif child.type == '*': # Generator indicator
+        #         method_info['is_generator'] = True
+        #     elif child.type == 'get': # <<< Added Getter Check
+        #          method_info['is_getter'] = True
+        #     elif child.type == 'set': # <<< Added Setter Check
+        #          method_info['is_setter'] = True
+
+        # Get method name (could be identifier or private_property_identifier)
         name_node = node.child_by_field_name('name')
         if name_node:
-            method_info['name'] = self._get_node_text(name_node, code)
+            name = self._get_node_text(name_node, code)
+            method_info['name'] = name
+            # Check if name node indicates private
+            if name_node.type == 'private_property_identifier': # <<< Check type for private
+                 method_info['is_private'] = True
+        else:
+            self.logger.warning(f"Method definition at line {method_info['line']} is missing a name.")
 
-        # Get parameters
+        # Get parameters & Check destructuring
+        params = []
+        has_destructured = False
         params_node = node.child_by_field_name('parameters')
         if params_node:
-            for param in params_node.children:
-                if param.type in ('identifier', 'object_pattern', 'array_pattern', 'rest_pattern'):
-                    method_info['parameters'].append(self._get_node_text(param, code))
+            # --- Refined Destructuring Check ---
+            for child in params_node.named_children: # Use named_children
+                param_text = self._get_node_text(child, code)
+                pattern_node = child
+                if child.type == 'required_parameter':
+                     pattern_node = child.child_by_field_name('pattern')
+                elif child.type == 'optional_parameter':
+                     pattern_node = child.child_by_field_name('pattern')
+                
+                if pattern_node:
+                    param_text = self._get_node_text(pattern_node, code)
+                    if pattern_node.type in ('object_pattern', 'array_pattern'):
+                        has_destructured = True
+                    elif pattern_node.type == 'rest_pattern':
+                        ident_node = next((sub for sub in pattern_node.children if sub.type == 'identifier'), None)
+                        if ident_node:
+                             param_text = f"...{self._get_node_text(ident_node, code)}"
+                        else:
+                             param_text = f"...{param_text}"
+                    params.append(param_text)
+                else:
+                     params.append(self._get_node_text(child, code))
+            # --- End Refined Check ---
+            
+            # Original loop
+            # for param in params_node.children:
+            #     if param.type in ('identifier', 'object_pattern', 'array_pattern', 'rest_pattern'):
+            #         method_info['parameters'].append(self._get_node_text(param, code))
+            #         if param.type in ('object_pattern', 'array_pattern'):
+            #             method_info['has_destructured_params'] = True
+            #     elif child.type == 'rest_parameter': # This was a typo, should be param.type
+            #          # ... rest_parameter handling ...
+
+        method_info['parameters'] = params
+        method_info['has_destructured_params'] = has_destructured
 
         # Get body location
         body_node = node.child_by_field_name('body')
@@ -584,6 +812,14 @@ class JavaScriptParserAdapter(BaseParserAdapter):
             method_info['body_end_line'] = body_node.end_point[0] + 1
 
         # Note: Return type extraction might need more logic if types are specified
+
+        # Check for try-catch blocks
+        has_try_catch = False
+        body_node = node.child_by_field_name('body')
+        if body_node:
+            body_text = self._get_node_text(body_node, code)
+            has_try_catch = 'try' in body_text and 'catch' in body_text
+        method_info['has_try_catch'] = has_try_catch
 
         return method_info
 
@@ -607,12 +843,16 @@ class JavaScriptParserAdapter(BaseParserAdapter):
                 field_info['is_static'] = True
                 break
         
-        # Get field name
+        # Get field name (could be identifier or private_property_identifier)
         name_node = node.child_by_field_name('name')
         if name_node:
-            field_info['name'] = self._get_node_text(name_node, code)
-            if field_info['name'].startswith('#'):
+            name = self._get_node_text(name_node, code)
+            field_info['name'] = name
+            # Check if name node indicates private
+            if name_node.type == 'private_property_identifier': # <<< Check type for private
                 field_info['is_private'] = True
+        else:
+            self.logger.warning(f"Field definition at line {field_info['line']} is missing a name node.")
         
         # Get field value if present
         value_node = node.child_by_field_name('value')
@@ -661,6 +901,17 @@ class JavaScriptParserAdapter(BaseParserAdapter):
 
                         if value_node:
                             var_info['value_type'] = value_node.type
+                            # Log type for all variables (Removed specific debug logging)
+                            # self.logger.debug(f"Variable '{name}' at line {var_info['line']} assigned value of type: {value_node.type}")
+                            
+                            # --- Refined Tagged Template Check --- 
+                            is_tagged = False
+                            if child.prev_named_sibling and child.prev_named_sibling.type == 'identifier':
+                                # If `tag` immediately precedes `template_string` value, it's tagged
+                                is_tagged = True
+                                var_info['is_tagged_template'] = True 
+                                self.logger.debug(f"Tagged template (sibling check) found for '{name}' at line {var_info['line']}")
+                            # --- End Refined Check ---
 
                             if value_node.type == 'call_expression':
                                 var_info['is_call_expression'] = True
@@ -668,9 +919,14 @@ class JavaScriptParserAdapter(BaseParserAdapter):
                                 var_info['is_new_expression'] = True
                             elif value_node.type == 'template_string':
                                 var_info['is_template_literal'] = True
+                                # Known Limitation: Parsing tagged templates accurately is complex.
+                                # The direct 'tagged_template_expression' type is preferred but 
+                                # might not always be generated by tree-sitter depending on context.
                             elif value_node.type == 'tagged_template_expression':
+                                # This is the ideal case, mark both flags.
                                 var_info['is_template_literal'] = True
                                 var_info['is_tagged_template'] = True
+                                self.logger.debug(f"Tagged template (direct) found for '{name}' at line {var_info['line']}")
                             elif value_node.type == 'arrow_function':
                                 var_info['is_arrow_function'] = True
 
@@ -697,21 +953,26 @@ class JavaScriptParserAdapter(BaseParserAdapter):
                 })
             elif child.type == 'rest_pattern':
                 # Rest pattern: ...rest
-                # Correctly find the identifier inside the rest pattern
-                name_node = child.child(0) # Usually the identifier is the first child
-                if name_node and name_node.type == 'identifier':
-                    name = self._get_node_text(name_node, code)
-                    variables.append({
-                        'name': name,
-                        'type': 'variable',
-                        'declaration_type': declaration_type,
-                        'is_destructured': True,
-                        'is_rest': True, # Corrected: Set to True for rest pattern
-                        'line': child.start_point[0] + 1,
-                        'column': child.start_point[1],
-                        'end_line': child.end_point[0] + 1,
-                        'end_column': child.end_point[1]
-                    })
+                # CORRECTED: Find the identifier within the rest_pattern's children
+                name = "<unknown_rest>"
+                ident_node = next((sub_child for sub_child in child.children if sub_child.type == 'identifier'), None)
+                if ident_node:
+                    name = self._get_node_text(ident_node, code)
+
+                # name_node = child.child(0) # Incorrect assumption
+                # if name_node and name_node.type == 'identifier': # Incorrect assumption
+                #     name = self._get_node_text(name_node, code)
+                variables.append({
+                    'name': name,
+                    'type': 'variable',
+                    'declaration_type': declaration_type,
+                    'is_destructured': True,
+                    'is_rest': True,
+                    'line': child.start_point[0] + 1,
+                    'column': child.start_point[1],
+                    'end_line': child.end_point[0] + 1,
+                    'end_column': child.end_point[1]
+                })
             elif child.type == 'identifier':
                 # Array destructuring: [name]
                 name = self._get_node_text(child, code)
@@ -1083,6 +1344,7 @@ class JavaScriptParserAdapter(BaseParserAdapter):
             'is_arrow': True, # Mark as arrow function
             'parameters': params,
             'has_try_catch': has_try_catch,
+            'has_destructured_params': False,
             'line': node.start_point[0] + 1,
             'column': node.start_point[1],
             'end_line': node.end_point[0] + 1,

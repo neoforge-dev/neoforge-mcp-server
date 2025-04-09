@@ -43,6 +43,7 @@ python-multipart>=0.0.5
 aiohttp>=3.8.0
 python-json-logger>=2.0.0
 python-digitalocean>=1.17.0
+slowapi>=0.1.9
 
 # Monitoring and load testing
 locust>=2.33.2 

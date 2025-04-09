@@ -92,8 +92,7 @@ openapi_url: "/openapi.json"
 
 # Rate limiting
 enable_rate_limiting: true
-rate_limit: 100
-rate_limit_window: 60
+default_rate_limit: "100/minute"
 
 # Cache settings
 enable_cache: true

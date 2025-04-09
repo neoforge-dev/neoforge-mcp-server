@@ -27,6 +27,8 @@ from server.llm.manager import ModelManager
 from server.llm.models import ModelConfig
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 # Add the parent directory to path to import the server module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -103,95 +105,99 @@ def event_loop():
 
 
 @pytest.fixture(scope="session")
-def core_client() -> TestClient:
+def core_client(mock_dependencies):
     """Create a test client for the Core MCP Server."""
     app = create_core_app()
-    return TestClient(app)
+    # Attach mocks/config to app state if tests need them
+    app.state.config = mock_dependencies["config"]
+    app.state.monitor = mock_dependencies["monitor"]
+    app.state.security = mock_dependencies["security"]
+    app.state.logger = mock_dependencies["logger"]
+    # Assuming core doesn't need limiter state attached directly for tests
+
+    with TestClient(app) as client:
+        yield client
 
 
 @pytest.fixture(scope="session")
-def llm_client():
+def llm_client(mock_dependencies):
     """Create a test client for the LLM MCP Server."""
-    llm_app = create_llm_app()
-    return TestClient(llm_app)
+    # Patch ModelManager specifically for LLM server *before* app creation
+    with patch('server.llm.server.ModelManager') as MockModelManager:
+        # Configure the mock ModelManager instance
+        mock_model_manager_instance = MagicMock()
+        mock_model_manager_instance.list_models.return_value = [{"id": "mock-model", "name": "mock-model", "config": {"provider":"mock"}, "type":"mock"}] # Provide more complete mock data
+        # Mock other methods called by the LLM server routes
+        mock_model_manager_instance.get_model.return_value = MagicMock( # Mock the returned model object
+            tokenizer=MagicMock(encode=lambda x: [1,2,3]),
+            generate=lambda prompt, **kwargs: f"Generated: {prompt}"
+        )
+        MockModelManager.return_value = mock_model_manager_instance
+
+        # Create app *while* mocks (including ModelManager) are active
+        llm_app = create_llm_app()
+
+        # Attach mocks/config to app state for tests to access if needed
+        llm_app.state.config = mock_dependencies["config"]
+        llm_app.state.monitor = mock_dependencies["monitor"]
+        llm_app.state.security = mock_dependencies["security"]
+        llm_app.state.logger = mock_dependencies["logger"]
+        llm_app.state.limiter = mock_dependencies.get("Limiter") # Safely get if exists
+        llm_app.state.model_manager = mock_model_manager_instance # Add specific mock manager
+
+        with TestClient(llm_app) as client:
+            yield client
 
 
 @pytest.fixture(scope="session")
-def neod_client():
+def neod_client(mock_dependencies):
     """Create a test client for the Neo Development Server."""
     neod_app = create_neod_app()
-    return TestClient(neod_app)
+    # Attach mocks/config to app state if tests need them
+    neod_app.state.config = mock_dependencies["config"]
+    neod_app.state.monitor = mock_dependencies["monitor"]
+    neod_app.state.security = mock_dependencies["security"]
+    neod_app.state.logger = mock_dependencies["logger"]
+    neod_app.state.limiter = mock_dependencies["Limiter"]
+
+    with TestClient(neod_app) as client:
+        yield client
 
 
 @pytest.fixture(scope="session")
-def neoo_client():
+def neoo_client(mock_dependencies):
     """Create a test client for the Neo Operations Server."""
     neoo_app = create_neoo_app()
-    return TestClient(neoo_app)
+    # Attach mocks/config to app state if tests need them
+    neoo_app.state.config = mock_dependencies["config"]
+    neoo_app.state.monitor = mock_dependencies["monitor"]
+    neoo_app.state.security = mock_dependencies["security"]
+    neoo_app.state.logger = mock_dependencies["logger"]
+    neoo_app.state.limiter = mock_dependencies["Limiter"]
+
+    with TestClient(neoo_app) as client:
+        yield client
 
 
 @pytest.fixture(scope="session")
-def neolocal_client() -> TestClient:
+def neolocal_client(mock_dependencies) -> TestClient:
     """Create a test client for the NeoLocal server with mocked dependencies."""
     # Patch dependencies similar to other server fixtures
-    with patch('server.utils.config.ConfigManager.load_config') as MockLoadConfig, \
-         patch('server.utils.base_server.LogManager') as MockLogManager, \
-         patch('server.utils.base_server.MonitoringManager') as MockMonitoringManager, \
-         patch('server.utils.base_server.SecurityManager') as MockSecurity, \
-         patch('server.utils.error_handling.logger') as MockErrorHandlingLogger:
+    # Dependencies are already mocked by mock_dependencies fixture
 
-        # Basic config mock
-        mock_config = ServerConfig(
-            name="neolocal_server",
-            port=7447,
-            log_level="DEBUG",
-            api_keys={"test-local-key": {"permissions": ["neolocal:*"], "description": "Test Local Key"}},
-            enable_metrics=True,  # Match health test expectation
-            enable_tracing=True,  # Match health test expectation
-        )
-        # Set attributes needed by NeoLocalServer endpoints after initialization
-        mock_config.enable_local_development = True
-        mock_config.enable_local_testing = True
-        # Set other neolocal specific attributes if needed by other tests
-        # mock_config.some_other_neolocal_setting = ...
+    # Create app *with* mocks active
+    app = create_neolocal_app()
 
-        MockLoadConfig.return_value = mock_config
+    # Attach config and mocks to app state (needed by tests)
+    app.state.config = mock_dependencies["config"]
+    app.state.monitor = mock_dependencies["monitor"] # Attach mock monitor
+    app.state.security = mock_dependencies["security"]
+    app.state.logger = mock_dependencies["logger"]
+    app.state.limiter = mock_dependencies["Limiter"]
 
-        # Mock loggers
-        mock_logger_instance = MagicMock(spec=logging.Logger)
-        mock_logger_instance.bind = MagicMock(return_value=mock_logger_instance)
-        MockLogManager.return_value.get_logger.return_value = mock_logger_instance
-        MockErrorHandlingLogger.bind = MagicMock(return_value=MockErrorHandlingLogger)
-
-        # Mock MonitoringManager instance
-        mock_monitor_instance = MagicMock(spec=MonitoringManager)
-        span_mock = MagicMock()
-        span_context_manager_mock = MagicMock()
-        span_context_manager_mock.__enter__.return_value = span_mock
-        span_context_manager_mock.__exit__.return_value = None
-        mock_monitor_instance.span_in_context.return_value = span_context_manager_mock
-        MockMonitoringManager.return_value = mock_monitor_instance # Return instance
-
-        # Mock SecurityManager instance
-        mock_security_instance = MagicMock()
-        mock_api_key_obj = ApiKey(
-            key_id="local-test-id", key_hash="local-test-hash", name="test-local-key",
-            created_at=time.time(), scopes=set(["neolocal:*"])
-        )
-        mock_security_instance.validate_api_key.return_value = mock_api_key_obj
-        mock_security_instance.check_permission.return_value = True
-        MockSecurity.return_value = mock_security_instance
-
-        # Create app *with* mocks active
-        app = create_neolocal_app()
-
-        # Attach config and mocks to app state (needed by tests)
-        app.state.config = mock_config
-        app.state.monitor = mock_monitor_instance # Attach mock monitor
-
-        # Yield the client
-        with TestClient(app) as client:
-            yield client
+    # Yield the client
+    with TestClient(app) as client:
+        yield client
 
 
 @pytest.fixture(scope="session")
@@ -464,4 +470,57 @@ def mock_neolocal_config():
         # Add any neolocal specific config here
         development_environment={"path": "/local/dev"},
         testing_framework={"type": "pytest", "path": "/local/tests"},
-    ) 
+    )
+
+# Fixture for a base config (used by multiple server tests)
+@pytest.fixture
+def base_test_config():
+    return ServerConfig(
+        name="test_server",
+        port=8001,
+        log_level="DEBUG",
+        api_keys={"test-key": {"permissions": ["read", "write"], "description": "Test Key"}},
+        enable_metrics=False,
+        enable_tracing=False,
+        enable_rate_limiting=False, # Disable by default for most tests
+        default_rate_limit="1000/second" # Use a high limit even if enabled
+    )
+
+# Common mock patches used by multiple server fixtures
+@pytest.fixture
+def mock_dependencies(base_test_config):
+    with patch('server.utils.config.ConfigManager.load_config') as MockLoadConfig, \
+         patch('server.utils.base_server.LogManager') as MockLogManager, \
+         patch('server.utils.base_server.MonitoringManager') as MockMonitoringManager, \
+         patch('server.utils.base_server.SecurityManager') as MockSecurity, \
+         patch('server.utils.error_handling.logger') as MockErrorHandlingLogger: # Removed limiter patch here
+
+        MockLoadConfig.return_value = base_test_config
+
+        mock_logger_instance = MagicMock(spec=logging.Logger)
+        mock_logger_instance.bind = MagicMock(return_value=mock_logger_instance)
+        MockLogManager.return_value.get_logger.return_value = mock_logger_instance
+        MockErrorHandlingLogger.bind = MagicMock(return_value=MockErrorHandlingLogger)
+
+        MockMonitoringManager.return_value = None
+
+        mock_security_instance = MagicMock()
+        mock_api_key_obj = ApiKey(
+            key_id="test-id", key_hash="test-hash", name="test-key",
+            created_at=time.time(), scopes=set(["read", "write"])
+        )
+        mock_security_instance.validate_api_key.return_value = mock_api_key_obj
+        mock_security_instance.check_permission.return_value = True
+        MockSecurity.return_value = mock_security_instance
+
+        yield {
+            "LoadConfig": MockLoadConfig,
+            "LogManager": MockLogManager,
+            "MonitoringManager": MockMonitoringManager,
+            "SecurityManager": MockSecurity,
+            "ErrorHandlingLogger": MockErrorHandlingLogger,
+            "config": base_test_config,
+            "logger": mock_logger_instance,
+            "monitor": None,
+            "security": mock_security_instance
+        } 

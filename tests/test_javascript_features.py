@@ -5,6 +5,8 @@ import logging
 from pathlib import Path
 from server.code_understanding.analyzer import CodeAnalyzer
 from server.code_understanding.common_types import MockNode, MockTree
+from server.code_understanding.language_adapters import JavaScriptParserAdapter
+from tree_sitter import Node
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -14,6 +16,23 @@ logging.getLogger('server.code_understanding').setLevel(logging.DEBUG)
 def analyzer():
     """Fixture to provide a CodeAnalyzer instance."""
     return CodeAnalyzer()
+
+# Helper function for temporary debugging
+def print_node_info(node: Node, code_bytes: bytes, indent: str = "", adapter: JavaScriptParserAdapter = None):
+    if not node:
+        return
+    try:
+        # Use the adapter's method if available, otherwise fallback
+        text = adapter._get_node_text(node, code_bytes) if adapter else node.text.decode('utf-8', 'replace')
+        print(f"{indent}Type: {node.type:<25} Range: {node.start_point} - {node.end_point} Text: '{text[:50]}{'...' if len(text)>50 else ''}'")
+        
+        # Print children recursively
+        if node.child_count > 0:
+            # print(f"{indent}  Children ({node.child_count}):\") # Can be verbose
+            for i, child in enumerate(node.children):
+                print_node_info(child, code_bytes, indent + "    ", adapter)
+    except Exception as e:
+        print(f"{indent}Error printing node info: {e}")
 
 def test_async_await_support(analyzer):
     """Test parsing of async/await syntax."""
@@ -57,6 +76,45 @@ const asyncArrow = async () => {
     # Note: We are not double-counting the method here as it's not in the top-level 'functions' list.
     # If methods were included in the main list, adjust the expected count.
     assert total_async_functions_found == 2, "Should find 2 async functions in the top-level list (fetchData, asyncArrow)"
+
+    # Verify tagged template
+    tagged_var = next((v for v in result.get('variables', []) if v['name'] == 'tagged'), None)
+    assert tagged_var, "Should find 'tagged' variable"
+    assert tagged_var.get('is_tagged_template', False), "'tagged' should be marked as tagged template"
+    
+    # --- Debugging Tagged Template ---
+    print("\n--- DEBUG: Inspecting 'tagged' variable assignment tree structure ---")
+    try:
+        adapter = JavaScriptParserAdapter()
+        parser = adapter.parser
+        tree_tagged = parser.parse(code.encode('utf-8'))
+        # Find the variable_declarator for 'tagged'
+        queue = [tree_tagged.root_node]
+        tagged_declarator = None
+        while queue:
+            n = queue.pop(0)
+            if n.type == 'variable_declarator':
+                name_node = n.child_by_field_name('name')
+                if name_node and adapter._get_node_text(name_node, code.encode('utf-8')) == 'tagged':
+                    tagged_declarator = n
+                    break
+            queue.extend(n.children)
+            
+        if tagged_declarator:
+            print("Node info for 'tagged' variable_declarator:")
+            print_node_info(tagged_declarator, code.encode('utf-8'), adapter=adapter)
+            value_node = tagged_declarator.child_by_field_name('value')
+            if value_node:
+                print("Value node info:")
+                print_node_info(value_node, code.encode('utf-8'), "  ", adapter=adapter)
+            else:
+                print("Could not find value node for 'tagged' declarator.")
+        else:
+            print("Could not find variable_declarator for 'tagged'.")
+    except Exception as e:
+        print(f"DEBUG Error: {e}")
+    print("--- END DEBUG: Tagged Template ---")
+    # --- End Debugging ---
 
 def test_export_variants(analyzer):
     """Test different types of export statements."""
@@ -259,11 +317,53 @@ class Derived extends Base {
     # TODO: KNOWN ISSUE - Class inheritance ('extends') detection is currently failing.
     # assert derived_class.get('extends') == 'Base', "Should find extends clause"
     pass
-    assert any(m['name'] == 'constructor' and m.get('calls_super', False) for m in derived_class.get('methods', [])), "Should find super call"
+    assert any(m['name'] == 'constructor' and m.get('is_private', False) == False for m in derived_class.get('methods', [])), "Constructor should not be private"
     
     # Check private members
     assert any(m['name'] == '#privateField' and m.get('is_private', False) for m in derived_class.get('fields', [])), "Should find private field"
     assert any(m['name'] == '#privateMethod' and m.get('is_private', False) for m in derived_class.get('methods', [])), "Should find private method"
+
+    # --- Debugging Super Call ---
+    print("\n--- DEBUG: Inspecting 'constructor' body for super() call ---")
+    try:
+        adapter = JavaScriptParserAdapter()
+        parser = adapter.parser
+        tree_class = parser.parse(code.encode('utf-8'))
+        # Find the constructor method definition in Derived class
+        constructor_node = None
+        queue = [tree_class.root_node]
+        while queue:
+            n = queue.pop(0)
+            if n.type == 'class_declaration':
+                class_name_node = n.child_by_field_name('name')
+                if class_name_node and adapter._get_node_text(class_name_node, code.encode('utf-8')) == 'Derived':
+                    body_node = n.child_by_field_name('body')
+                    if body_node:
+                        for child in body_node.children:
+                            if child.type == 'method_definition':
+                                method_name_node = child.child_by_field_name('name')
+                                if method_name_node and adapter._get_node_text(method_name_node, code.encode('utf-8')) == 'constructor':
+                                    constructor_node = child
+                                    break
+                    break # Found Derived class
+            if constructor_node: break
+            queue.extend(n.children)
+            
+        if constructor_node:
+            constructor_body = constructor_node.child_by_field_name('body')
+            if constructor_body:
+                print("Nodes in constructor body:")
+                print_node_info(constructor_body, code.encode('utf-8'), adapter=adapter)
+            else:
+                print("Could not find constructor body node.")
+        else:
+            print("Could not find constructor method definition.")
+    except Exception as e:
+        print(f"DEBUG Error: {e}")
+    print("--- END DEBUG: Super Call ---")
+    # --- End Debugging ---
+    
+    assert any(m['name'] == 'constructor' and m.get('calls_super', False) for m in derived_class.get('methods', [])), "Should find super call"
 
 def test_error_handling(analyzer):
     """Test parsing of error handling constructs."""
@@ -324,13 +424,42 @@ def test_syntax_errors(analyzer):
         """
     ]
     
-    for code in invalid_codes:
+    for i, code in enumerate(invalid_codes):
+        print(f"Testing invalid code snippet {i+1}")
+        result = analyzer.analyze_code(code, language='javascript')
+        print(f"Result for snippet {i+1}: {result}")
+        
+        # --- Debugging Syntax Errors ---
+        print(f"\n--- DEBUG: Inspecting tree for syntax error snippet {i+1} ---")
         try:
-            result = analyzer.analyze_code(code, language='javascript')
-            assert result is not None, "Should handle syntax errors gracefully"
-            assert result.get('has_errors', False), "Should mark result as having errors"
+            adapter = JavaScriptParserAdapter()
+            parser = adapter.parser
+            tree_error = parser.parse(code.encode('utf-8'))
+            if tree_error.root_node:
+                print("Root node has error:", tree_error.root_node.has_error)
+                print("Root node info:")
+                print_node_info(tree_error.root_node, code.encode('utf-8'), adapter=adapter)
+                # Explicitly look for ERROR type nodes
+                print("\nSearching for ERROR nodes:")
+                queue = [tree_error.root_node]
+                found_error_nodes = []
+                while queue:
+                    n = queue.pop(0)
+                    if n.type == 'ERROR':
+                        found_error_nodes.append(n)
+                        print(f"  Found ERROR node: {n.start_point}-{n.end_point} Text: {adapter._get_node_text(n, code.encode('utf-8'))}")
+                    queue.extend(n.children)
+                if not found_error_nodes:
+                    print("  No nodes explicitly typed as ERROR found.")
+            else:
+                print("Failed to parse syntax error snippet.")
         except Exception as e:
-            pytest.fail(f"Failed to handle syntax error: {e}")
+            print(f"DEBUG Error: {e}")
+        print(f"--- END DEBUG: Syntax Error Snippet {i+1} ---")
+        # --- End Debugging ---
+        
+        assert result.get('has_errors', False), "Should mark result as having errors"
+        assert 'errors' in result, "Should have errors list"
 
 def test_file_based_analysis(analyzer, tmp_path):
     """Test analyzing JavaScript files."""

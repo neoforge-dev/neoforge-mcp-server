@@ -60,8 +60,7 @@ cache_ttl: 3600
 
 # Rate limiting
 enable_rate_limiting: true
-rate_limit: 100
-rate_limit_window: 60
+default_rate_limit: "100/minute"
 
 # SSL/TLS settings
 enable_ssl: false
