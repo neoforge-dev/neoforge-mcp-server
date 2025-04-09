@@ -3,8 +3,13 @@ Core MCP Server - Provides core functionality and command execution.
 """
 
 from typing import Any, Dict, Optional
-from fastapi import Depends, HTTPException, Security
+from fastapi import Depends, HTTPException, Security, Request
 from fastapi.security import APIKeyHeader
+from fastapi.responses import StreamingResponse
+import json
+import time
+import asyncio
+import uuid
 
 from ..utils.base_server import BaseServer
 from ..utils.error_handling import handle_exceptions, MCPError
@@ -46,6 +51,61 @@ class CoreMCPServer(BaseServer):
     def register_routes(self) -> None:
         """Register API routes."""
         super().register_routes()
+        
+        @self.app.get("/sse")
+        async def sse_endpoint(request: Request):
+            """Server-Sent Events endpoint for real-time updates."""
+            async def event_generator():
+                try:
+                    # Check rate limit for SSE connections
+                    api_key = request.headers.get("X-API-Key")
+                    if api_key and not self.security.check_rate_limit(api_key):
+                        error_event = {
+                            "type": "error",
+                            "data": {
+                                "code": "rate_limit_exceeded",
+                                "message": "Rate limit exceeded"
+                            }
+                        }
+                        yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
+                        return
+
+                    # Keep connection alive and send periodic updates
+                    while True:
+                        if await request.is_disconnected():
+                            break
+                            
+                        update_event = {
+                            "type": "update",
+                            "data": {
+                                "id": str(uuid.uuid4()),
+                                "timestamp": int(time.time()),
+                                "status": "ok"
+                            }
+                        }
+                        yield f"event: update\ndata: {json.dumps(update_event)}\n\n"
+                        await asyncio.sleep(1)  # Send updates every second
+                        
+                except Exception as e:
+                    error_event = {
+                        "type": "error",
+                        "data": {
+                            "code": "internal_error",
+                            "message": str(e)
+                        }
+                    }
+                    yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
+                    
+            return StreamingResponse(
+                event_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                    "Content-Type": "text/event-stream"
+                }
+            )
         
         @self.app.post("/api/v1/execute")
         @handle_exceptions()

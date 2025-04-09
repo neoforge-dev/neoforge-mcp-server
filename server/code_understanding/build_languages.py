@@ -8,8 +8,15 @@ import shutil
 import platform
 
 # Constants
-JAVASCRIPT_LANGUAGE_PATH = os.path.join(os.path.dirname(__file__), 'build', 'javascript.so')
-TYPESCRIPT_LANGUAGE_PATH = os.path.join(os.path.dirname(__file__), 'build', 'typescript.so')
+BUILD_DIR = os.path.join(os.path.dirname(__file__), 'build')
+# Determine the correct file extension based on OS
+LIB_EXTENSION = '.dylib' if platform.system() == 'Darwin' else '.so'
+# Define paths using the correct extension
+JAVASCRIPT_LANGUAGE_FILENAME = 'javascript' + LIB_EXTENSION # e.g., javascript.dylib or javascript.so
+JAVASCRIPT_LANGUAGE_PATH = os.path.join(BUILD_DIR, JAVASCRIPT_LANGUAGE_FILENAME)
+
+TYPESCRIPT_LANGUAGE_FILENAME = 'typescript' + LIB_EXTENSION # e.g., typescript.dylib or typescript.so
+TYPESCRIPT_LANGUAGE_PATH = os.path.join(BUILD_DIR, TYPESCRIPT_LANGUAGE_FILENAME)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,20 +53,27 @@ def build_languages():
         
         # Determine expected library file based on OS
         built_lib_path = None
+        lib_name = None # Variable to store the actual library name found
+
         so_path = js_repo_path / 'parser.so'
-        dylib_path = js_repo_path / 'javascript.dylib'
+        dylib_path = js_repo_path / 'javascript.dylib' # Standard name on macOS
 
         if so_path.exists():
             built_lib_path = so_path
-            lib_name = 'parser.so'
+            lib_name = 'parser.so' # Use the actual name
         elif platform.system() == "Darwin" and dylib_path.exists():
             built_lib_path = dylib_path
-            lib_name = 'javascript.dylib'
+            lib_name = 'javascript.dylib' # Use the actual name
 
-        # Copy the built files
-        if built_lib_path:
-            shutil.copy2(built_lib_path, build_dir / 'javascript.so')
-            logger.info(f"Successfully copied {lib_name} as JavaScript grammar")
+        # Copy the built files using the correct name
+        if built_lib_path and lib_name:
+             # Ensure the target directory exists
+            target_dir = build_dir
+            target_dir.mkdir(exist_ok=True)
+            
+            target_path = build_dir / lib_name # Use the original name
+            shutil.copy2(built_lib_path, target_path)
+            logger.info(f"Successfully copied {lib_name} as JavaScript grammar to {target_path}")
             return True
         else:
             logger.error(f"Failed to find built parser library (.so or .dylib) in {js_repo_path}")
@@ -90,28 +104,30 @@ def build_javascript_grammar():
         
         # Determine expected library file based on OS
         built_lib_path = None
+        lib_name = None # Variable to store the actual library name found
+
         so_path = js_repo / 'parser.so'
-        dylib_path = js_repo / 'javascript.dylib'
+        dylib_path = js_repo / 'javascript.dylib' # Standard name on macOS
 
         if so_path.exists():
             built_lib_path = so_path
-            lib_name = 'parser.so'
+            lib_name = 'parser.so' # Use the actual name
         elif platform.system() == "Darwin" and dylib_path.exists():
             built_lib_path = dylib_path
-            lib_name = 'javascript.dylib'
+            lib_name = 'javascript.dylib' # Use the actual name
 
-        # Copy the built parser to the build directory
-        if built_lib_path:
+        # Copy the built parser to the build directory with its original name
+        if built_lib_path and lib_name:
             # Ensure the target directory exists
             target_dir = build_dir
             target_dir.mkdir(exist_ok=True)
-            
-            # Copy the file
-            shutil.copy2(built_lib_path, build_dir / 'javascript.so')
-            logger.info(f"Successfully copied {lib_name} as JavaScript grammar to build directory")
+
+            target_path = build_dir / lib_name # Use the original name
+            shutil.copy2(built_lib_path, target_path)
+            logger.info(f"Successfully copied {lib_name} as JavaScript grammar to {target_path}")
         else:
             raise Exception(f"Parser library (.so or .dylib) not found in {js_repo}")
-        
+
         logger.info("Successfully built JavaScript grammar")
         return True
     except Exception as e:

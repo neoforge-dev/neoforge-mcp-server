@@ -21,7 +21,7 @@ from .error_handling import handle_exceptions, MCPError
 api_key_header = APIKeyHeader(name="X-API-Key")
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Middleware for logging requests."""
+    """Middleware for logging request details."""
     
     async def dispatch(
         self, request: Request, call_next
@@ -36,37 +36,34 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             The response
         """
         start_time = time.time()
-        
-        # Get request details
-        method = request.method
-        url = str(request.url)
-        client = request.client.host if request.client else "unknown"
-        
-        # Process request
         response = await call_next(request)
-        
-        # Calculate processing time
         process_time = time.time() - start_time
         
-        # Log request
-        response.headers["X-Process-Time"] = str(process_time)
+        # Skip logging for SSE connections
+        if request.url.path == "/sse":
+            return response
         
-        # Format log message
+        # Prepare log data
         log_data = {
-            "method": method,
-            "url": url,
-            "client": client,
-            "status_code": response.status_code,
-            "process_time": process_time
+            "extra": {
+                "client": request.client.host if request.client else "unknown",
+                "method": request.method,
+                "url": str(request.url),
+                "status_code": response.status_code,
+                "process_time": process_time
+            }
         }
+        
+        # Get logger from request state since response might not have state
+        log_manager = request.state.log_manager
         
         # Log based on status code
         if response.status_code >= 500:
-            response.state.log_manager.error("Server error", **log_data)
+            log_manager.error("Server error", extra=log_data["extra"])
         elif response.status_code >= 400:
-            response.state.log_manager.warning("Client error", **log_data)
+            log_manager.warning("Client error", extra=log_data["extra"])
         else:
-            response.state.log_manager.info("Request processed", **log_data)
+            log_manager.info("Request processed", extra=log_data["extra"])
             
         return response
 
@@ -169,7 +166,8 @@ class BaseServer:
             
         # Initialize security
         self.security = SecurityManager(
-            secret_key=self.config.auth_token
+            secret_key=self.config.auth_token,
+            config_api_keys=self.config.api_keys
         )
         
     def _setup_middleware(self) -> None:
@@ -255,6 +253,7 @@ class BaseServer:
                 
             return {
                 "status": "healthy",
+                "service": self.app.title,
                 "version": self.config.version,
                 "monitoring": {
                     "metrics": self.config.enable_metrics,

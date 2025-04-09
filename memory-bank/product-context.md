@@ -1,51 +1,35 @@
 # Product Context
 
 ## Purpose
-Distributed system for dev/ops tasks with AI integration
+- Distributed system for AI-enhanced dev/ops tasks.
 
-## Problems Solved
-- Poor separation of concerns
-- Limited scalability/maintenance
-- Inefficient resources
-- Security gaps
-- Limited monitoring
+## Problems Solved (Arch)
+- Improves: Separation of concerns, scalability, maintainability, security, monitoring.
 
-## User Goals
-- Devs: Quick tools, code gen, clear feedback
-- Ops: Monitoring, maintenance, resource mgmt
-- Security: Controls, audits, policies
-- Users: Fast service, clear errors
+## Key Success Metrics (Goals)
+- **Performance:** <100ms response, 99.9% uptime, <1% errors.
+- **Security:** No critical vulns, full input validation.
+- **Dev:** >90% test coverage, clean code standards.
 
-## Core Features
-- Security: Auth, validation, isolation
-- Monitoring: OpenTelemetry, Prometheus
-- Comms: HTTP/WS, events
-- Performance: Async, caching, scaling
+## Servers (Function & Port)
+- **Core (7443):** Tool mgmt, coordination
+- **LLM (7444):** Model ops, code gen
+- **NeoDev (7445):** Dev tools, workspaces
+- **NeoOps (7446):** Process/resource monitoring
+- **NeoLocal (7447):** Local system ops
+- **NeoLLM (7448):** Local model ops
+- **NeoDO (7449):** Direct execution
+*(`project-brief.md` is primary port reference)*
 
-## Success Metrics
-- Perf: <100ms resp, 99.9% uptime, <1% errors
-- Security: No critical vulns, full validation
-- Dev: 90% coverage, clean code
-- Users: Quick response, clear errors
-
-## Servers
-1. Core (7443): Tool mgmt, coordination
-2. LLM (7444): Model ops, code gen
-3. Neo Dev (7445): Dev tools, workspaces
-4. Neo Ops (7446): Process/resource monitoring
-5. Neo Local (7447): Local system ops
-6. Neo LLM (7448): Local model ops
-7. Neo DO (7449): Direct execution
-
-## Flow
-1. Request → Server
-2. Validate + Auth
-3. Process
-4. Return
+## Basic Request Flow
+1. Receive Request
+2. Validate + AuthN/Z
+3. Process Logic
+4. Send Response
 5. Log/Monitor
 
-## Future
-- Scale: Horizontal, load balance
-- Features: New tools, security
-- Integrate: More LLMs, services
-- UX: Better feedback, docs 
+## Future Considerations
+- Scaling (Load Balancing)
+- Feature Expansion (Tools, Security)
+- Integrations (LLMs, Services)
+- UX Improvements 

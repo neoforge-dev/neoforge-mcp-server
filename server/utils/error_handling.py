@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional, Type, Union
 from functools import wraps
 import traceback
 import logging
+import asyncio
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -58,9 +59,13 @@ def handle_exceptions(error_code: str = "TOOL_ERROR", log_traceback: bool = True
     """Decorator to handle exceptions in tool functions."""
     def decorator(func):
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        async def wrapper(*args, **kwargs):
             try:
-                return func(*args, **kwargs)
+                # Await the result if the original function is async
+                if asyncio.iscoroutinefunction(func):
+                    return await func(*args, **kwargs)
+                else:
+                    return func(*args, **kwargs)
             except MCPError as e:
                 if log_traceback:
                     logger.error(f"Tool error in {func.__name__}: {str(e)}\n{traceback.format_exc()}")

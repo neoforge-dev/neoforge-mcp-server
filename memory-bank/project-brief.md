@@ -1,33 +1,29 @@
-# MCP Server Architecture
+# Project Brief: MCP Server Architecture
 
 ## Core Objectives
-- Distributed architecture, clear separation
-- Secure comms, monitoring, error handling
-- High performance, scalability, extensibility
+- Build distributed, secure, observable, resilient, performant, scalable, extensible servers.
+- Enforce clear separation of concerns.
 
-## Servers
-| Server | Port | Purpose |
-|--------|------|---------|
-| Core | 7443 | Base functionality |
-| LLM | 7444 | LLM integration |
-| Neo Dev | 7445 | Dev tools |
-| Neo Ops | 7446 | Resource mgmt |
-| Neo Local | 7447 | Local ops |
-| Neo LLM | 7448 | Local LLM |
-| Neo DO | 7449 | Direct ops |
+## Servers & Ports (Primary Reference)
+- **Core:** 7443
+- **LLM:** 7444
+- **NeoDev:** 7445
+- **NeoOps:** 7446
+- **NeoLocal:** 7447
+- **NeoLLM:** 7448
+- **NeoDO:** 7449
 
-## Requirements
-- Security: Auth, validation, isolation
-- Monitoring: OpenTelemetry, Prometheus
-- Comms: HTTP/WS, events
-- Performance: Async, caching
-- Dev: Clean arch, testing
+## Key Requirements
+- **Security:** AuthN/Z, input validation, process isolation.
+- **Monitoring:** OpenTelemetry (Metrics/Tracing), Prometheus.
+- **Comms:** HTTP/WebSocket, Events (TBD).
+- **Performance:** Async I/O, caching (TBD).
+- **Dev:** Clean arch, TDD (>90% coverage), `BaseServer` migration.
 
-## Phase
-1. Core ✅
-2. Enhanced (Current)
-3. Components (Next)
-4. Optimize (Future)
+## Current Phase (Q2 2024)
+- **Phase 2:** Refactor all servers to use `BaseServer`, Increase Test Coverage.
+- **Next:** Phase 3 (Component Development).
 
-## Core Deps
-FastMCP, OpenTelemetry, Tree-sitter, TikToken 
+## Core External Dependencies
+- FastMCP, OpenTelemetry, Tree-sitter, TikToken.
+- *See `tech-context.md` & `requirements.txt` for details.* 

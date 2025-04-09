@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, List, Callable
 from functools import wraps
 from contextlib import contextmanager
 from opentelemetry import trace, metrics
-from opentelemetry.trace import Span, Status, StatusCode
+from opentelemetry.trace import Span, Status, StatusCode, SpanKind
 from opentelemetry.metrics import Meter, Counter, UpDownCounter, Histogram
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.metrics import MeterProvider
@@ -67,17 +67,19 @@ class MonitoringManager:
             
     def _setup_tracing(self, endpoint: Optional[str]) -> None:
         """Setup tracing with OpenTelemetry."""
-        # Create tracer provider
-        tracer_provider = TracerProvider(resource=self.resource)
-        
-        # Add OTLP exporter if endpoint provided
-        if endpoint:
-            otlp_exporter = OTLPSpanExporter(endpoint=endpoint)
-            span_processor = BatchSpanProcessor(otlp_exporter)
-            tracer_provider.add_span_processor(span_processor)
+        # Only set up tracing if no provider exists
+        if trace.get_tracer_provider() is None:
+            # Create tracer provider
+            tracer_provider = TracerProvider(resource=self.resource)
             
-        # Set global tracer provider
-        trace.set_tracer_provider(tracer_provider)
+            # Add OTLP exporter if endpoint provided
+            if endpoint:
+                otlp_exporter = OTLPSpanExporter(endpoint=endpoint)
+                span_processor = BatchSpanProcessor(otlp_exporter)
+                tracer_provider.add_span_processor(span_processor)
+                
+            # Set global tracer provider
+            trace.set_tracer_provider(tracer_provider)
         
         # Get tracer
         self.tracer = trace.get_tracer(
@@ -87,20 +89,22 @@ class MonitoringManager:
         
     def _setup_metrics(self, endpoint: Optional[str]) -> None:
         """Setup metrics with OpenTelemetry."""
-        # Create metric readers
-        readers = []
-        if endpoint:
-            otlp_exporter = OTLPMetricExporter(endpoint=endpoint)
-            readers.append(PeriodicExportingMetricReader(otlp_exporter))
+        # Only set up metrics if no provider exists
+        if metrics.get_meter_provider() is None:
+            # Create metric readers
+            readers = []
+            if endpoint:
+                otlp_exporter = OTLPMetricExporter(endpoint=endpoint)
+                readers.append(PeriodicExportingMetricReader(otlp_exporter))
             
-        # Create meter provider
-        meter_provider = MeterProvider(
-            resource=self.resource,
-            metric_readers=readers
-        )
-        
-        # Set global meter provider
-        metrics.set_meter_provider(meter_provider)
+            # Create meter provider
+            meter_provider = MeterProvider(
+                resource=self.resource,
+                metric_readers=readers
+            )
+            
+            # Set global meter provider
+            metrics.set_meter_provider(meter_provider)
         
         # Get meter
         self.meter = metrics.get_meter(
@@ -142,14 +146,14 @@ class MonitoringManager:
         self,
         name: str,
         attributes: Optional[Dict[str, Any]] = None,
-        kind: Optional[trace.SpanKind] = None
+        kind: Optional[trace.SpanKind] = trace.SpanKind.SERVER
     ) -> Span:
         """Create a new span.
         
         Args:
             name: Span name
             attributes: Span attributes
-            kind: Span kind
+            kind: Span kind (defaults to SERVER)
             
         Returns:
             New span
@@ -168,14 +172,14 @@ class MonitoringManager:
         self,
         name: str,
         attributes: Optional[Dict[str, Any]] = None,
-        kind: Optional[trace.SpanKind] = None
+        kind: Optional[trace.SpanKind] = trace.SpanKind.SERVER
     ):
         """Create a span and set it as the current span.
         
         Args:
             name: Span name
             attributes: Span attributes
-            kind: Span kind
+            kind: Span kind (defaults to SERVER)
             
         Yields:
             Active span
@@ -195,14 +199,14 @@ class MonitoringManager:
         self,
         name: Optional[str] = None,
         attributes: Optional[Dict[str, Any]] = None,
-        kind: Optional[trace.SpanKind] = None
+        kind: Optional[trace.SpanKind] = trace.SpanKind.SERVER
     ) -> Callable:
         """Decorator to trace a function.
         
         Args:
             name: Span name (defaults to function name)
             attributes: Span attributes
-            kind: Span kind
+            kind: Span kind (defaults to SERVER)
             
         Returns:
             Decorated function

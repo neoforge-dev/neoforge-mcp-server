@@ -43,6 +43,11 @@ class JSONFormatter(logging.Formatter):
             'line': record.lineno
         }
         
+        # Add any extra fields from the record
+        for key, value in record.__dict__.items():
+            if key not in data and not key.startswith('_'):
+                data[key] = value
+        
         # Add exception info if present
         if record.exc_info:
             data['exception'] = {
@@ -51,19 +56,7 @@ class JSONFormatter(logging.Formatter):
                 'traceback': self.formatException(record.exc_info)
             }
             
-        # Add extra fields
-        if hasattr(record, 'extra_fields'):
-            data.update(record.extra_fields)
-            
-        try:
-            return json.dumps(data)
-        except Exception as e:
-            return json.dumps({
-                'timestamp': datetime.now().isoformat(),
-                'level': 'ERROR',
-                'message': 'Failed to format log record as JSON',
-                'error': str(e)
-            })
+        return json.dumps(data)
 
 class LogManager:
     """Manages logging setup and configuration."""

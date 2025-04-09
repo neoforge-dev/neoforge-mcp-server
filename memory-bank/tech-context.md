@@ -1,53 +1,42 @@
 # Tech Context
 
-## Stack
-- Core: Python 3.11+, FastMCP
-- Monitoring: OpenTelemetry, Prometheus
-- Security: Process isolation, validation
-
-## Servers
-| Server | Tech |
-|--------|------|
-| Core | FastMCP, Tool registry |
-| LLM | TikToken, LLM |
-| Neo Dev | venv, pytest |
-| Neo Ops | psutil, Docker |
-| Neo Local | File ops, uv |
-| Neo LLM | LLM models |
-| Neo DO | Process control |
+## Core Stack
+- **Language:** Python 3.11+
+- **Framework:** FastAPI
+- **Testing:** Pytest (+ asyncio, cov)
+- **Lint/Type:** Ruff, Mypy
+- **Monitoring:** OpenTelemetry SDK, Prometheus Client
+- **Config:** PyYAML, Pydantic, python-dotenv
+- **Other Key Libs:** `psutil`, `tiktoken`, `tree-sitter`, `httpx`.
+- *See `requirements.txt` for full list/versions.*
 
 ## Setup
 ```bash
-python -m venv venv
+# 1. venv
 source venv/bin/activate
+# 2. Install
 pip install -r requirements.txt
+# 3. Tree-sitter (If needed)
+# python server/code_understanding/build_languages.py
 ```
 
-## Config
-- `.env`: Env vars
-- `config/`: Server
-- `monitoring/`: Metrics
-- `security/`: Policies
+## Configuration
+- **Secrets:** `.env`
+- **Servers:** `config/<server_name>.yml`
+- **Policies:** `server/utils/security.py` (code)
 
-## Constraints
-- Perf: <100ms resp, <512MB/server
-- Scale: Horizontal, stateless
-- Security: Sandboxed, validated
-- Reliability: Auto-recovery
+## Key Constraints/Goals (Current Focus)
+- **Testing:** TDD, >90% coverage.
+- **Security:** Input validation, AuthN/Z, secure defaults.
+- **Performance:** Goals exist (<100ms API, <512MB RAM), monitor during refactor.
+- **Scalability:** Design for horizontal scaling.
 
-## Core Deps
-```
-fastmcp>=1.0.0
-opentelemetry-api>=1.0.0
-prometheus-client>=0.9.0
-psutil>=5.8.0
-pytest>=7.0.0
-ruff>=0.1.0
-```
+## Servers
+- See `project-brief.md` for server list and ports.
 
-## Future
-1. K8s integration
-2. Cloud support
-3. More LLMs
-4. Enhanced security
-5. Advanced monitoring
+## Future Considerations
+- Kubernetes integration.
+- Cloud deployment support.
+- Additional LLM integrations.
+- Advanced security features (e.g., WAF).
+- Enhanced monitoring dashboards/alerts.

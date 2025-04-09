@@ -3,7 +3,7 @@ Neo Local MCP Server - Provides local development and testing functionality.
 """
 
 from typing import Any, Dict, Optional, List
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, FastAPI
 
 from ..utils.base_server import BaseServer
 from ..utils.error_handling import handle_exceptions
@@ -377,6 +377,8 @@ class NeoLocalServer(BaseServer):
                         detail=str(e)
                     )
 
-# Create server instance
-server = NeoLocalServer()
-app = server.get_app() 
+def create_app() -> FastAPI:
+    """Factory function to create the NeoLocalServer FastAPI app."""
+    server = NeoLocalServer()
+    server.register_routes()
+    return server.app 

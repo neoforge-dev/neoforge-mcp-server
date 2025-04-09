@@ -59,6 +59,7 @@ class ServerConfig:
         # API keys
         anthropic_api_key: Optional[str] = None,
         openai_api_key: Optional[str] = None,
+        do_token: Optional[str] = None,
         api_keys: Optional[Dict[str, str]] = None,
         # Security settings
         enable_auth: bool = False,
@@ -190,6 +191,7 @@ class ServerConfig:
         # API keys
         self.anthropic_api_key = anthropic_api_key
         self.openai_api_key = openai_api_key
+        self.do_token = do_token
         self.api_keys = api_keys or {}
         
         # Security settings
@@ -383,44 +385,59 @@ class ConfigManager:
                 )
                 
     def load_config(self, server_name: str) -> ServerConfig:
-        """Load configuration for a server.
-        
-        Args:
-            server_name: Name of the server to load config for
-            
-        Returns:
-            ServerConfig object
-        """
+        """Load configuration for a server, merging with default.yaml."""
         if server_name in self.configs:
             return self.configs[server_name]
-            
-        # Look for config files
+
+        # 1. Load default config first
+        default_config_data = {}
+        default_path = self.config_dir / "default.yaml"
+        if default_path.exists():
+            try:
+                default_config_data = self._load_yaml(default_path)
+            except Exception as e:
+                # Handle potential errors loading default config, maybe log?
+                print(f"Warning: Could not load default config {default_path}: {e}") 
+
+        # 2. Load server-specific config
+        server_config_data = {}
         config_files = [
             (self.config_dir / f"{server_name}.yaml", self._load_yaml),
             (self.config_dir / f"{server_name}.yml", self._load_yaml),
             (self.config_dir / f"{server_name}.json", self._load_json)
         ]
-        
-        config_data = {}
         for path, loader in config_files:
             if path.exists():
-                config_data = loader(path)
-                break
-                
-        # Ensure server name is set
-        config_data['name'] = server_name
-        
-        # Apply environment overrides
-        self._apply_env_overrides(config_data)
-        
-        # Validate config
-        self._validate_config(config_data)
-        
-        # Create config object
-        config = ServerConfig(**config_data)
-        self.configs[server_name] = config
-        
-        return config
+                try:
+                    server_config_data = loader(path)
+                    break # Found server specific, stop looking
+                except Exception as e:
+                     print(f"Warning: Could not load server config {path}: {e}") 
+                     break # Stop trying if error on specific file
+
+        # 3. Merge configs (server-specific overrides default)
+        # Use dict unpacking for merging (Python 3.5+)
+        # Ensure nested dictionaries are merged recursively if needed (simple update here)
+        # A more robust merge might be needed for deeply nested structures
+        merged_config_data = {**default_config_data, **server_config_data}
+
+        # 4. Ensure server name is set (use provided name over config file)
+        merged_config_data['name'] = server_name
+
+        # 5. Apply environment overrides (after merging)
+        self._apply_env_overrides(merged_config_data)
+
+        # 6. Validate final merged config
+        self._validate_config(merged_config_data)
+
+        # 7. Create config object
+        try:
+            config = ServerConfig(**merged_config_data)
+            self.configs[server_name] = config
+            return config
+        except TypeError as e:
+            # Catch errors if merged_config_data has keys not in ServerConfig
+            raise MCPError(f"Configuration error for {server_name}: Invalid key found - {e}")
         
     def save_config(self, config: ServerConfig, format: str = 'yaml') -> None:
         """Save configuration to file.

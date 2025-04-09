@@ -2,6 +2,6 @@
 Neo Local MCP Server package.
 """
 
-from .server import server, app
+from .server import create_app
 
-__all__ = ["server", "app"] 
+__all__ = ["create_app"] 

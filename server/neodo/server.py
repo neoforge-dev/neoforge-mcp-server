@@ -11,6 +11,7 @@ import time
 import subprocess
 import shutil
 import digitalocean
+from fastapi import FastAPI
 
 from ..utils.base_server import BaseServer
 from ..utils.error_handling import handle_exceptions, MCPError
@@ -29,16 +30,16 @@ class NeoDOServer(BaseServer):
         # Initialize DO client
         self._init_do_client()
         
-        # Register routes
-        self.register_routes()
+        # Register routes - This is done by BaseServer.__init__
+        # self.register_routes()
         
     def _init_do_client(self) -> None:
         """Initialize DigitalOcean client."""
         try:
-            # Get DO token from environment
-            do_token = os.getenv("DO_TOKEN")
+            # Get DO token from config
+            do_token = self.config.do_token
             if not do_token:
-                raise MCPError("DO_TOKEN environment variable not set")
+                raise MCPError("DO Token not configured (do_token field in config)")
                 
             # Initialize manager
             self.do_manager = digitalocean.Manager(token=do_token)
@@ -52,26 +53,6 @@ class NeoDOServer(BaseServer):
             )
             raise MCPError(f"Failed to initialize DO client: {e}")
         
-    async def get_api_key(self, api_key: str = Security(api_key_header)) -> ApiKey:
-        """Validate API key and return key info.
-        
-        Args:
-            api_key: API key from request header
-            
-        Returns:
-            ApiKey object
-            
-        Raises:
-            HTTPException if key is invalid
-        """
-        try:
-            return self.security.validate_api_key(api_key)
-        except MCPError as e:
-            raise HTTPException(
-                status_code=401,
-                detail=str(e)
-            )
-            
     def register_routes(self) -> None:
         """Register API routes."""
         super().register_routes()
@@ -518,6 +499,13 @@ class NeoDOServer(BaseServer):
                         detail=str(e)
                     )
 
-# Create server instance
-server = NeoDOServer()
-app = server.get_app() 
+# App Factory pattern
+def create_app() -> FastAPI:
+    """Factory function to create the NeoDOServer FastAPI app."""
+    server = NeoDOServer()
+    # Routes are registered in BaseServer init
+    return server.app
+
+# Remove direct instantiation
+# server = NeoDOServer()
+# app = server.get_app() 

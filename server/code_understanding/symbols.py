@@ -30,6 +30,10 @@ class SymbolExtractor:
             'variables': []
         }
 
+        if tree is None or tree.root_node is None:
+            logger.warning("Attempted to extract symbols from an empty or invalid tree.")
+            return symbols
+            
         if tree.root_node.type == 'program':
             for node in tree.root_node.children:
                 if node.type == 'function_declaration':

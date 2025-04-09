@@ -4,384 +4,177 @@ LLM MCP Server - Provides LLM-related tools and functionality.
 
 import os
 from typing import Any, Dict, Optional, List
-from fastapi import Depends, HTTPException, Security
+from fastapi import Depends, HTTPException, Security, Request, FastAPI
 from fastapi.security import APIKeyHeader
 import anthropic
 import openai
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import logging
+from pydantic import BaseModel
 
-from ..utils.base_server import BaseServer
-from ..utils.error_handling import handle_exceptions, MCPError
-from ..utils.security import ApiKey
+# Import BaseServer and necessary utilities
+from server.utils.base_server import BaseServer
+from server.utils.error_handling import handle_exceptions
+from server.utils.security import ApiKey # Import ApiKey
+# Removed ApiKey, get_api_key import - get_api_key is a BaseServer method
+# from server.utils.security import ApiKey, get_api_key
 from ..utils.logging import LogManager
+
+# Import LLM specific logic - Using local placeholders
+# from server.core import LanguageModel, ModelConfig, Tokenizer, ModelManager
+from .models import LanguageModel, ModelConfig, Tokenizer
+from .manager import ModelManager
 
 # API key header
 api_key_header = APIKeyHeader(name="X-API-Key")
 
-class LLMMCPServer(BaseServer):
-    """LLM MCP Server implementation."""
-    
-    def __init__(self, app_name: str = "llm_mcp"):
-        """Initialize LLM MCP Server.
-        
-        Args:
-            app_name: Name of the application
-        """
-        super().__init__(app_name)
-        
-        # Initialize LLM clients
-        self._init_llm_clients()
-        
-        # Register routes
-        self._register_routes()
-        
-    def _init_llm_clients(self) -> None:
-        """Initialize LLM clients and models."""
-        # Initialize Anthropic client
-        anthropic_api_key = self.config.anthropic_api_key
-        if anthropic_api_key:
-            self.anthropic_client = anthropic.Anthropic(api_key=anthropic_api_key)
-        else:
-            self.anthropic_client = None
-            
-        # Initialize OpenAI client
-        openai_api_key = self.config.openai_api_key
-        if openai_api_key:
-            self.openai_client = openai.OpenAI(api_key=openai_api_key)
-        else:
-            self.openai_client = None
-            
-        # Initialize local models if enabled
-        self.local_models = {}
-        if self.config.enable_local_models:
-            try:
-                # Load local models
-                model_path = self.config.local_model_path
-                if model_path and os.path.exists(model_path):
-                    for model_dir in os.listdir(model_path):
-                        full_path = os.path.join(model_path, model_dir)
-                        if os.path.isdir(full_path):
-                            try:
-                                model = AutoModelForCausalLM.from_pretrained(full_path)
-                                tokenizer = AutoTokenizer.from_pretrained(full_path)
-                                self.local_models[model_dir] = {
-                                    "model": model,
-                                    "tokenizer": tokenizer
-                                }
-                            except Exception as e:
-                                self.logger.warning(
-                                    f"Failed to load local model {model_dir}",
-                                    error=str(e)
-                                )
-            except Exception as e:
-                self.logger.error(
-                    "Failed to initialize local models: %s",
-                    str(e)
-                )
-                
-    async def get_api_key(self, api_key: str = Security(api_key_header)) -> ApiKey:
-        """Validate API key and return key info.
-        
-        Args:
-            api_key: API key from request header
-            
-        Returns:
-            ApiKey object
-            
-        Raises:
-            HTTPException if key is invalid
-        """
-        try:
-            return self.security.validate_api_key(api_key)
-        except MCPError as e:
-            raise HTTPException(
-                status_code=401,
-                detail=str(e)
-            )
-            
-    def _register_routes(self) -> None:
-        """Register API routes."""
-        super().register_routes()
-        
-        @self.app.post("/api/v1/generate")
-        @handle_exceptions()
-        async def generate_text(
-            prompt: str,
-            model: Optional[str] = None,
-            max_tokens: Optional[int] = None,
-            temperature: Optional[float] = None,
-            api_key: ApiKey = Depends(self.get_api_key)
-        ) -> Dict[str, Any]:
-            """Generate text using an LLM.
-            
-            Args:
-                prompt: Text prompt
-                model: Model to use (default: config)
-                max_tokens: Maximum tokens to generate
-                temperature: Sampling temperature
-                api_key: Validated API key
-                
-            Returns:
-                Generated text
-            """
-            # Check permissions
-            if not self.security.check_permission(api_key, "generate:text"):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Insufficient permissions"
-                )
-                
-            # Use defaults from config
-            model = model or self.config.default_model
-            max_tokens = max_tokens or self.config.max_tokens
-            temperature = temperature or self.config.temperature
-            
-            # Generate text
-            with self.monitor.span_in_context(
-                "generate_text",
-                attributes={
-                    "model": model,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature
-                }
-            ):
-                try:
-                    # Route to appropriate model
-                    if model in self.local_models:
-                        result = self._generate_local(
-                            prompt,
-                            model,
-                            max_tokens,
-                            temperature
-                        )
-                    elif model.startswith("claude-"):
-                        if not self.anthropic_client:
-                            raise HTTPException(
-                                status_code=503,
-                                detail="Anthropic API not configured"
-                            )
-                        result = self._generate_anthropic(
-                            prompt,
-                            model,
-                            max_tokens,
-                            temperature
-                        )
-                    elif model.startswith("gpt-"):
-                        if not self.openai_client:
-                            raise HTTPException(
-                                status_code=503,
-                                detail="OpenAI API not configured"
-                            )
-                        result = self._generate_openai(
-                            prompt,
-                            model,
-                            max_tokens,
-                            temperature
-                        )
-                    else:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Unsupported model: {model}"
-                        )
-                        
-                    return result
-                    
-                except Exception as e:
-                    self.logger.error(
-                        "Text generation failed",
-                        error=str(e),
-                        model=model,
-                        max_tokens=max_tokens,
-                        temperature=temperature
-                    )
-                    raise HTTPException(
-                        status_code=500,
-                        detail=str(e)
-                    )
-                    
-        @self.app.post("/api/v1/embed")
-        @handle_exceptions()
-        async def embed_text(
-            text: str,
-            model: Optional[str] = None,
-            api_key: ApiKey = Depends(self.get_api_key)
-        ) -> Dict[str, Any]:
-            """Generate embeddings for text.
-            
-            Args:
-                text: Text to embed
-                model: Model to use
-                api_key: Validated API key
-                
-            Returns:
-                Text embeddings
-            """
-            # Check permissions
-            if not self.security.check_permission(api_key, "generate:embeddings"):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Insufficient permissions"
-                )
-                
-            # Use default model
-            model = model or self.config.default_model
-            
-            # Generate embeddings
-            with self.monitor.span_in_context(
-                "embed_text",
-                attributes={"model": model}
-            ):
-                try:
-                    # Use OpenAI embeddings
-                    if model.startswith("text-embedding"):
-                        if not self.openai_client:
-                            raise HTTPException(
-                                status_code=400,
-                                detail="OpenAI API not configured"
-                            )
-                        return self._embed_openai(text, model)
-                        
-                    else:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Unsupported embedding model: {model}"
-                        )
-                        
-                except Exception as e:
-                    self.logger.error(
-                        "Embedding generation failed",
-                        error=str(e),
-                        model=model
-                    )
-                    raise HTTPException(
-                        status_code=500,
-                        detail=str(e)
-                    )
-                    
-    def _generate_local(
-        self,
-        prompt: str,
-        model: str,
-        max_tokens: int,
-        temperature: float
-    ) -> Dict[str, Any]:
-        """Generate text using a local model.
-        
-        Args:
-            prompt: Text prompt
-            model: Model name
-            max_tokens: Maximum tokens
-            temperature: Sampling temperature
-            
-        Returns:
-            Generated text
-        """
-        model_info = self.local_models[model]
-        inputs = model_info["tokenizer"](prompt, return_tensors="pt")
-        
-        with torch.no_grad():
-            outputs = model_info["model"].generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                temperature=temperature,
-                do_sample=True
-            )
-            
-        text = model_info["tokenizer"].decode(outputs[0])
-        return {
-            "status": "success",
-            "text": text,
-            "model": model
-        }
-        
-    def _generate_anthropic(
-        self,
-        prompt: str,
-        model: str,
-        max_tokens: int,
-        temperature: float
-    ) -> Dict[str, Any]:
-        """Generate text using Anthropic API.
-        
-        Args:
-            prompt: Text prompt
-            model: Model name
-            max_tokens: Maximum tokens
-            temperature: Sampling temperature
-            
-        Returns:
-            Generated text
-        """
-        response = self.anthropic_client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        
-        return {
-            "status": "success",
-            "text": response.content[0].text,
-            "model": model
-        }
-        
-    def _generate_openai(
-        self,
-        prompt: str,
-        model: str,
-        max_tokens: int,
-        temperature: float
-    ) -> Dict[str, Any]:
-        """Generate text using OpenAI API.
-        
-        Args:
-            prompt: Text prompt
-            model: Model name
-            max_tokens: Maximum tokens
-            temperature: Sampling temperature
-            
-        Returns:
-            Generated text
-        """
-        response = self.openai_client.chat.completions.create(
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        
-        return {
-            "status": "success",
-            "text": response.choices[0].message.content,
-            "model": model
-        }
-        
-    def _embed_openai(
-        self,
-        text: str,
-        model: str
-    ) -> Dict[str, Any]:
-        """Generate embeddings using OpenAI API.
-        
-        Args:
-            text: Text to embed
-            model: Model name
-            
-        Returns:
-            Text embeddings
-        """
-        response = self.openai_client.embeddings.create(
-            model=model,
-            input=text
-        )
-        
-        return {
-            "status": "success",
-            "embeddings": response.data[0].embedding,
-            "model": model
-        }
+# --- Pydantic Models for API --- (Keep these)
+class GenerateRequest(BaseModel):
+    prompt: str
+    model_name: Optional[str] = None
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+    # Add other generation parameters as needed
 
-# Create server instance
-server = LLMMCPServer()
-app = server.app 
+class GenerateResponse(BaseModel):
+    text: str
+    model_name: str
+    tokens_generated: int
+
+class TokenizeRequest(BaseModel):
+    text: str
+    model_name: Optional[str] = None
+
+class TokenizeResponse(BaseModel):
+    tokens: List[int]
+    count: int
+    model_name: str
+
+class ModelInfo(BaseModel):
+    name: str
+    config: Dict[str, Any]
+    type: str # e.g., 'local', 'openai', 'anthropic'
+
+class ListModelsResponse(BaseModel):
+    models: List[ModelInfo]
+
+class LLMServer(BaseServer):
+    """LLM Server implementation inheriting from BaseServer."""
+
+    def __init__(self):
+        """Initialize LLM Server."""
+        # Call BaseServer init with the specific app name
+        # BaseServer handles config loading, logging, monitoring, security setup
+        super().__init__(app_name="llm_server") # Use correct app name if different
+
+        # Initialize LLM specific components (using config from BaseServer)
+        self.model_manager = ModelManager(config=self.config)
+        # BaseServer setup logger, access via self.logger
+        self.logger.info("LLM Server initialized with Model Manager")
+
+    def register_routes(self) -> None:
+        """Register LLM specific routes after base routes."""
+        # Register base routes (like /health) from BaseServer
+        super().register_routes()
+
+        # Add LLM specific routes
+        @self.app.post("/api/v1/generate", response_model=GenerateResponse, tags=["LLM"])
+        @handle_exceptions()
+        async def generate(
+            request_body: GenerateRequest,
+            request: Request, # Access logger/managers via request state
+            api_key: ApiKey = Depends(self.get_api_key) # Re-integrate security
+        ) -> GenerateResponse:
+            """Generate text using a specified or default LLM."""
+            # Access logger from request state (set up by BaseServer middleware)
+            logger = request.state.log_manager
+            logger.info(
+                f"Received generation request for model: {request_body.model_name or 'default'}",
+                extra={"prompt_start": request_body.prompt[:50]}
+            )
+
+            # Use ModelManager (initialized in __init__)
+            model = self.model_manager.get_model(request_body.model_name)
+
+            # Override generation parameters if provided in request
+            gen_params = {
+                'max_tokens': request_body.max_tokens,
+                'temperature': request_body.temperature,
+            }
+            gen_params = {k: v for k, v in gen_params.items() if v is not None}
+
+            # Generate text using the model from ModelManager
+            generated_text = model.generate(request_body.prompt, **gen_params)
+            # Use the model's tokenizer
+            tokens_generated = len(model.tokenizer.encode(generated_text))
+
+            logger.info(
+                f"Generated {tokens_generated} tokens using model: {model.name}",
+                extra={"generated_text_start": generated_text[:50]}
+            )
+
+            return GenerateResponse(
+                text=generated_text,
+                model_name=model.name,
+                tokens_generated=tokens_generated
+            )
+
+        @self.app.post("/api/v1/tokenize", response_model=TokenizeResponse, tags=["LLM"])
+        @handle_exceptions()
+        async def tokenize(
+            request_body: TokenizeRequest,
+            request: Request,
+            api_key: ApiKey = Depends(self.get_api_key) # Re-integrate security
+       ) -> TokenizeResponse:
+            """Tokenize text using a specified or default model's tokenizer."""
+            logger = request.state.log_manager
+            logger.info(
+                f"Received tokenization request for model: {request_body.model_name or 'default'}",
+                extra={"text_start": request_body.text[:50]}
+            )
+
+            model = self.model_manager.get_model(request_body.model_name)
+            tokens = model.tokenizer.encode(request_body.text)
+            count = len(tokens)
+
+            logger.info(f"Tokenized text into {count} tokens using tokenizer for: {model.name}")
+
+            return TokenizeResponse(
+                tokens=tokens,
+                count=count,
+                model_name=model.name
+            )
+
+        @self.app.get("/api/v1/models", response_model=ListModelsResponse, tags=["LLM"])
+        @handle_exceptions()
+        async def list_models(
+            request: Request,
+            api_key: ApiKey = Depends(self.get_api_key) # Re-integrate security
+        ) -> ListModelsResponse:
+            """List available language models."""
+            logger = request.state.log_manager
+            logger.info("Received request to list models")
+
+            available_models = self.model_manager.list_models()
+            # Ensure ModelConfig can be dict converted if needed by ModelInfo
+            # If ModelConfig is a Pydantic model, .dict() works.
+            model_infos = [
+                ModelInfo(name=m.name, config=m.config.dict(), type=m.type)
+                for m in available_models
+            ]
+
+            logger.info(f"Returning {len(model_infos)} available models")
+            return ListModelsResponse(models=model_infos)
+
+# Create server instance ONLY when run directly or via app factory
+# server = LLMServer() # Avoid module-level instantiation
+# app = server.app # Avoid module-level instantiation
+
+# App Factory pattern (optional, but good practice)
+def create_app() -> FastAPI:
+    server = LLMServer()
+    return server.app
+
+# You might need to adjust server/llm/__init__.py and tests/conftest.py
+# if they directly imported the 'app' variable previously. 

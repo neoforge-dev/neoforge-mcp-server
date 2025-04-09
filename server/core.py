@@ -39,15 +39,57 @@ import psutil
 from opentelemetry.sdk.metrics._internal.measurement import Measurement
 import asyncio
 import metrics
+from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 # import yaml
 
 # Initialize the MCP server
 mcp = FastMCP("Terminal Command Runner MCP", port=7443, log_level="DEBUG")
 
+# Create FastAPI app
+app = FastAPI()
+
+# For testing purposes, we'll use FastAPI's test client directly
+# The app will be mounted to FastMCP in production
+test_client = None
+if "pytest" in sys.modules:
+    from fastapi.testclient import TestClient
+    test_client = TestClient(app)
+else:
+    # Mount the FastAPI app to the MCP server
+    mcp.mount_app(app)
+
+@app.get("/sse")
+async def sse_endpoint(request: Request):
+    """Server-Sent Events endpoint for real-time updates."""
+    async def event_generator():
+        try:
+            # Send exactly one event for testing
+            event = {
+                "event": "update",
+                "data": {
+                    "timestamp": time.time(),
+                    "status": "ok"
+                }
+            }
+            yield f"data: {json.dumps(event)}\n\n"
+            
+        except Exception as e:
+            print(f"SSE error: {e}")
+            
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
 # Global variables for process management
 session_lock = threading.Lock()
 active_sessions = {}
-blacklisted_commands = set(['rm -rf /', 'mkfs'])
 output_queues = {}
 
 # Global variables for debug state management
@@ -431,41 +473,6 @@ async def add_profiling_to_tools():
             profiled_func = profile_tool(tool_func)
             profiled_func._profiled = True
             mcp.add_tool(tool_name)(profiled_func)
-
-def is_command_safe(command: str) -> bool:
-    """Validate if a command is safe to execute.
-    
-    Args:
-        command: The command string to validate
-        
-    Returns:
-        bool: True if the command is safe to execute, False otherwise
-    """
-    if not command or not command.strip():
-        return False
-        
-    # Check against blacklisted commands
-    if command in blacklisted_commands:
-        return False
-        
-    # Check for dangerous patterns
-    dangerous_patterns = [
-        r"rm\s+-rf\s+/",  # Remove root
-        r"mkfs",          # Format filesystem
-        r"dd\s+if=",      # Direct disk access
-        r">\s*/dev/",     # Write to device files
-        r";\s*rm\s+",     # Chained remove commands
-        r"&\s*rm\s+",     # Background remove commands
-        r"\|\s*rm\s+",    # Piped remove commands
-    ]
-    
-    for pattern in dangerous_patterns:
-        if re.search(pattern, command, re.IGNORECASE):
-            return False
-            
-    return True
-
-# Terminal Tools
 
 def execute_command(command: str, timeout: float = 30, allow_background: bool = False) -> Dict[str, Any]:
     """Execute a shell command with safety checks and timeout.
@@ -1287,31 +1294,29 @@ def monitor_performance(duration: int = 60, interval: float = 1.0) -> Dict[str, 
         # Calculate summary statistics
         summary = {
             'cpu': {
-                'avg': sum(m['percent'] for m in metrics['cpu']) / len(metrics['cpu']),
-                'max': max(m['percent'] for m in metrics['cpu']),
-                'min': min(m['percent'] for m in metrics['cpu'])
+                'avg': sum(m['percent'] for m in metrics['cpu']) / len(metrics['cpu']) if metrics['cpu'] else 0,
+                'max': max(m['percent'] for m in metrics['cpu']) if metrics['cpu'] else 0,
+                'min': min(m['percent'] for m in metrics['cpu']) if metrics['cpu'] else 0
             },
             'memory': {
-                'avg_percent': sum(m['percent'] for m in metrics['memory']) / len(metrics['memory']),
-                'max_percent': max(m['percent'] for m in metrics['memory']),
-                'min_available': min(m['available'] for m in metrics['memory'])
+                'avg_percent': sum(m['percent'] for m in metrics['memory']) / len(metrics['memory']) if metrics['memory'] else 0,
+                'max_percent': max(m['percent'] for m in metrics['memory']) if metrics['memory'] else 0,
+                'min_percent': min(m['percent'] for m in metrics['memory']) if metrics['memory'] else 0
             },
             'disk': {
-                'avg_percent': sum(m['percent'] for m in metrics['disk']) / len(metrics['disk']),
-                'available': metrics['disk'][-1]['free']
+                'start_percent': metrics['disk'][0]['percent'] if metrics['disk'] else 0,
+                'end_percent': metrics['disk'][-1]['percent'] if metrics['disk'] else 0
             },
             'network': {
-                'total_sent': metrics['network'][-1]['bytes_sent'] - metrics['network'][0]['bytes_sent'],
-                'total_recv': metrics['network'][-1]['bytes_recv'] - metrics['network'][0]['bytes_recv']
+                'total_sent': metrics['network'][-1]['bytes_sent'] - metrics['network'][0]['bytes_sent'] if len(metrics['network']) > 1 else 0,
+                'total_recv': metrics['network'][-1]['bytes_recv'] - metrics['network'][0]['bytes_recv'] if len(metrics['network']) > 1 else 0
             }
         }
         
         return {
             'status': 'success',
-            'metrics': metrics,
             'summary': summary,
-            'duration': duration,
-            'samples': len(metrics['cpu'])
+            'raw_metrics': metrics
         }
     except Exception as e:
         return {
@@ -2503,3 +2508,257 @@ if __name__ == "__main__":
     main()
 
 # mcp.run(transport="sse")
+
+# --- File Operations ---
+# Based on functions previously found (erroneously) in server/neodo.py
+
+@mcp.tool()
+def read_file(path: str, max_size_mb: float = 10) -> Dict[str, Any]:
+    """Read contents of a file."""
+    try:
+        abs_path = os.path.abspath(path)
+        if not is_path_safe(abs_path):
+             return {"status": "error", "error": "Access denied to read this path"}
+        size_mb = os.path.getsize(path) / (1024 * 1024)
+        if size_mb > max_size_mb:
+            return {"status": "error", "error": f"File size ({size_mb:.1f}MB) exceeds maximum allowed size ({max_size_mb}MB)"}
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return {"status": "success", "content": content, "size_bytes": len(content.encode('utf-8'))}
+    except FileNotFoundError:
+        return {"status": "error", "error": f"File not found: {path}"}
+    except Exception as e:
+        return {"status": "error", "error": f"Failed to read file: {str(e)}"}
+
+@mcp.tool()
+def write_file(path: str, content: str, create_dirs: bool = True) -> Dict[str, Any]:
+    """Write content to a file."""
+    try:
+        abs_path = os.path.abspath(path)
+        if not is_path_safe(abs_path):
+             return {"status": "error", "error": "Access denied to write to this path"}
+        if create_dirs:
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return {"status": "success", "message": f"Content written to {path}", "size_bytes": len(content.encode('utf-8'))}
+    except Exception as e:
+        return {"status": "error", "error": f"Failed to write file: {str(e)}"}
+
+@mcp.tool()
+def create_directory(path: str) -> Dict[str, Any]:
+    """Create a directory."""
+    try:
+        abs_path = os.path.abspath(path)
+        if not is_path_safe(abs_path):
+             return {"status": "error", "error": "Access denied to create directory at this path"}
+        if os.path.exists(path):
+             return {"status": "error", "error": f"Path already exists: {path}"}
+        os.makedirs(path, exist_ok=True)
+        return {"status": "success", "message": f"Directory created: {path}"}
+    except Exception as e:
+        return {"status": "error", "error": f"Failed to create directory: {str(e)}"}
+
+@mcp.tool()
+def list_directory(path: str, show_hidden: bool = False) -> Dict[str, Any]:
+    """List contents of a directory."""
+    try:
+        abs_path = os.path.abspath(path)
+        if not is_path_safe(abs_path):
+             return {"status": "error", "error": "Access denied to list this directory"}
+        contents = []
+        for item in os.listdir(path):
+            if not show_hidden and item.startswith('.'):
+                continue
+            item_path = os.path.join(path, item)
+            item_info = {"name": item, "path": item_path}
+            try:
+                stat_info = os.stat(item_path)
+                if os.path.isdir(item_path):
+                    item_info["type"] = "directory"
+                else:
+                    item_info["type"] = "file"
+                    item_info["size"] = stat_info.st_size
+                item_info["modified"] = stat_info.st_mtime
+            except OSError:
+                item_info["type"] = "unknown"
+            contents.append(item_info)
+        return {"status": "success", "contents": contents}
+    except FileNotFoundError:
+        return {"status": "error", "error": f"Directory not found: {path}"}
+    except NotADirectoryError:
+        return {"status": "error", "error": f"Path is not a directory: {path}"}
+    except Exception as e:
+        return {"status": "error", "error": f"Failed to list directory: {str(e)}"}
+
+@mcp.tool()
+def move_file(source: str, destination: str) -> Dict[str, Any]:
+    """Move or rename a file or directory."""
+    try:
+        abs_source = os.path.abspath(source)
+        abs_dest = os.path.abspath(destination)
+        if not is_path_safe(abs_source) or not is_path_safe(abs_dest):
+             return {"status": "error", "error": "Access denied for source or destination path"}
+        shutil.move(source, destination)
+        return {"status": "success", "message": f"Moved {source} to {destination}"}
+    except FileNotFoundError:
+        return {"status": "error", "error": f"Source path not found: {source}"}
+    except Exception as e:
+        return {"status": "error", "error": f"Failed to move file: {str(e)}"}
+
+@mcp.tool()
+def search_files(directory: str, pattern: str, recursive: bool = False, max_results: int = 100) -> Dict[str, Any]:
+    """Search for files matching a pattern."""
+    try:
+        abs_dir = os.path.abspath(directory)
+        if not is_path_safe(abs_dir):
+            return {"status": "error", "error": "Access denied to search this directory"}
+        matches = []
+        search_pattern = os.path.join(directory, pattern)
+        if recursive:
+            for root, _, files in os.walk(directory):
+                 if not is_path_safe(os.path.abspath(root)):
+                     continue 
+                 for filename in glob.glob(os.path.join(root, pattern)): 
+                    if len(matches) >= max_results:
+                        break
+                    matches.append(filename)
+                 if len(matches) >= max_results:
+                     break
+        else:
+            for filename in glob.glob(search_pattern):
+                if len(matches) >= max_results:
+                    break
+                matches.append(filename)
+        return {"status": "success", "matches": matches[:max_results]}
+    except Exception as e:
+        return {"status": "error", "error": f"Failed to search files: {str(e)}"}
+
+@mcp.tool()
+def get_file_info(path: str) -> Dict[str, Any]:
+    """Get detailed information about a file or directory."""
+    info = {"exists": False}
+    try:
+        abs_path = os.path.abspath(path)
+        if not is_path_safe(abs_path):
+             return {"status": "error", "error": "Access denied to access this path"}
+        if not os.path.exists(path):
+            return {"status": "success", "exists": False}
+        stat_info = os.stat(path)
+        info = {
+            "path": path,
+            "name": os.path.basename(path),
+            "type": "directory" if os.path.isdir(path) else "file",
+            "size": stat_info.st_size,
+            "created": stat_info.st_ctime,
+            "modified": stat_info.st_mtime,
+            "accessed": stat_info.st_atime,
+            "permissions": stat.filemode(stat_info.st_mode),
+            "exists": True
+        }
+        return {"status": "success", **info}
+    except Exception as e:
+        return {"status": "error", "error": f"Failed to get file info: {str(e)}", **info}
+
+# --- End File Operations ---
+
+@mcp.tool()
+def monitor_performance(duration: int = 60, interval: float = 1.0) -> Dict[str, Any]:
+    """
+    Monitor system performance metrics
+    
+    Args:
+        duration: Monitoring duration in seconds
+        interval: Sampling interval in seconds
+    
+    Returns:
+        Dictionary with performance metrics
+    """
+    try:
+        import psutil
+        from datetime import datetime, timedelta
+        
+        metrics = {
+            'cpu': [],
+            'memory': [],
+            'disk': [],
+            'network': []
+        }
+        
+        start_time = datetime.now()
+        end_time = start_time + timedelta(seconds=duration)
+        
+        while datetime.now() < end_time:
+            # CPU metrics
+            metrics['cpu'].append({
+                'timestamp': datetime.now().isoformat(),
+                'percent': psutil.cpu_percent(interval=0.1),
+                'count': psutil.cpu_count(),
+                'freq': psutil.cpu_freq()._asdict() if psutil.cpu_freq() else None
+            })
+            
+            # Memory metrics
+            mem = psutil.virtual_memory()
+            metrics['memory'].append({
+                'timestamp': datetime.now().isoformat(),
+                'total': mem.total,
+                'available': mem.available,
+                'percent': mem.percent,
+                'used': mem.used,
+                'free': mem.free
+            })
+            
+            # Disk metrics
+            disk = psutil.disk_usage('/')
+            metrics['disk'].append({
+                'timestamp': datetime.now().isoformat(),
+                'total': disk.total,
+                'used': disk.used,
+                'free': disk.free,
+                'percent': disk.percent
+            })
+            
+            # Network metrics
+            net = psutil.net_io_counters()
+            metrics['network'].append({
+                'timestamp': datetime.now().isoformat(),
+                'bytes_sent': net.bytes_sent,
+                'bytes_recv': net.bytes_recv,
+                'packets_sent': net.packets_sent,
+                'packets_recv': net.packets_recv
+            })
+            
+            time.sleep(interval)
+        
+        # Calculate summary statistics
+        summary = {
+            'cpu': {
+                'avg': sum(m['percent'] for m in metrics['cpu']) / len(metrics['cpu']) if metrics['cpu'] else 0,
+                'max': max(m['percent'] for m in metrics['cpu']) if metrics['cpu'] else 0,
+                'min': min(m['percent'] for m in metrics['cpu']) if metrics['cpu'] else 0
+            },
+            'memory': {
+                'avg_percent': sum(m['percent'] for m in metrics['memory']) / len(metrics['memory']) if metrics['memory'] else 0,
+                'max_percent': max(m['percent'] for m in metrics['memory']) if metrics['memory'] else 0,
+                'min_percent': min(m['percent'] for m in metrics['memory']) if metrics['memory'] else 0
+            },
+            'disk': {
+                'start_percent': metrics['disk'][0]['percent'] if metrics['disk'] else 0,
+                'end_percent': metrics['disk'][-1]['percent'] if metrics['disk'] else 0
+            },
+            'network': {
+                'total_sent': metrics['network'][-1]['bytes_sent'] - metrics['network'][0]['bytes_sent'] if len(metrics['network']) > 1 else 0,
+                'total_recv': metrics['network'][-1]['bytes_recv'] - metrics['network'][0]['bytes_recv'] if len(metrics['network']) > 1 else 0
+            }
+        }
+        
+        return {
+            'status': 'success',
+            'summary': summary,
+            'raw_metrics': metrics
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }

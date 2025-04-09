@@ -335,6 +335,15 @@ wheels = [
 ]
 
 [[package]]
+name = "jsonpickle"
+version = "4.0.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d6/33/4bda317ab294722fcdfff8f63aab74af9fda3675a4652d984a101aa7587e/jsonpickle-4.0.5.tar.gz", hash = "sha256:f299818b39367c361b3f26bdba827d4249ab5d383cd93144d0f94b5417aacb35", size = 315661 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dc/1b/0e79cf115e0f54f1e8f56effb6ffd2ef8f92e9c324d692ede660067f1bfe/jsonpickle-4.0.5-py3-none-any.whl", hash = "sha256:b4ac7d0a75ddcdfd93445737f1d36ff28768690d43e54bf5d0ddb1d915e580df", size = 46382 },
+]
+
+[[package]]
 name = "markdown-it-py"
 version = "3.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -877,6 +886,19 @@ wheels = [
 ]
 
 [[package]]
+name = "python-digitalocean"
+version = "1.17.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jsonpickle" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f8/f7/43cb73fb393c4c0da36294b6040c7424bc904042d55c1b37c73ecc9e7714/python-digitalocean-1.17.0.tar.gz", hash = "sha256:107854fde1aafa21774e8053cf253b04173613c94531f75d5a039ad770562b24", size = 33586 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e4/4f/87c17d4e23a62273c192656300e92a26bf6d5d8b2908cf2fc4a5a96da4b2/python_digitalocean-1.17.0-py3-none-any.whl", hash = "sha256:0032168e022e85fca314eb3f8dfaabf82087f2ed40839eb28f1eeeeca5afb1fa", size = 40298 },
+]
+
+[[package]]
 name = "python-dotenv"
 version = "1.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -904,6 +926,7 @@ dependencies = [
     { name = "pytest-anyio" },
     { name = "pytest-cov" },
     { name = "pytest-mock" },
+    { name = "python-digitalocean" },
     { name = "pyyaml" },
     { name = "tree-sitter" },
 ]
@@ -939,6 +962,7 @@ requires-dist = [
     { name = "pytest-anyio" },
     { name = "pytest-cov", specifier = ">=4.1.0" },
     { name = "pytest-mock", specifier = ">=3.11.1" },
+    { name = "python-digitalocean", specifier = ">=1.17.0" },
     { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "torch", marker = "extra == 'llm'", specifier = ">=2.2.0" },
     { name = "transformers", marker = "extra == 'llm'", specifier = ">=4.38.0" },

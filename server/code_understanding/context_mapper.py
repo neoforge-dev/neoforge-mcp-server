@@ -24,25 +24,30 @@ class ContextMapper:
         """Analyze a file and build its context map.
         
         Args:
-            file_path: Path to the file
+            file_path: Path to the file (can be relative to root_dir)
             content: File contents
             
         Returns:
             Dictionary containing analysis results
         """
-        # Get semantic analysis
-        semantic_result = self.semantic_analyzer.analyze_file(file_path, content)
+        # Ensure file_path is absolute for consistent resolution
+        abs_file_path_obj = self.root_dir / file_path
+        abs_file_path = str(abs_file_path_obj.resolve()) # Resolve symlinks and get absolute path string
+
+        # Get semantic analysis (using original file_path key? TBD, using abs path for now)
+        semantic_result = self.semantic_analyzer.analyze_file(abs_file_path, content)
         
-        # Get module dependencies
-        module_deps = self.module_resolver.get_module_dependencies(file_path)
+        # Get module dependencies using the absolute path
+        module_deps = self.module_resolver.get_module_dependencies(abs_file_path)
         
-        # Build context map
-        context_info = self._build_context_info(file_path, semantic_result, module_deps)
+        # Build context map using absolute path
+        context_info = self._build_context_info(abs_file_path, semantic_result, module_deps)
         
-        # Store results
+        # Store results using the original file_path as the key for consistency? Or abs path?
+        # Using original relative path as key seems more user-friendly if root_dir is known.
         self.context_map[file_path] = context_info
         
-        # Update relationships
+        # Update relationships using original file_path key
         self._update_relationships(file_path, context_info)
         
         return context_info
@@ -169,20 +174,20 @@ class ContextMapper:
         if file_path in self.context_map:
             context_info = self.context_map[file_path]
             
-            # Check types
-            if symbol in context_info['types']:
-                return {
-                    'type': 'type',
-                    'symbol': symbol,
-                    'type_info': str(context_info['types'][symbol])
-                }
-                
-            # Check contexts
+            # Check contexts FIRST (function, class, etc.)
             if symbol in context_info['contexts']:
                 return {
                     'type': context_info['contexts'][symbol]['type'],
                     'symbol': symbol,
                     'context': context_info['contexts'][symbol]
+                }
+                
+            # Check types SECOND (variable, general type definition)
+            if symbol in context_info['types']:
+                return {
+                    'type': 'type',
+                    'symbol': symbol,
+                    'type_info': str(context_info['types'][symbol])
                 }
                 
         return None
@@ -218,48 +223,79 @@ class ContextMapper:
             List of usage information
         """
         if file_path not in self.context_map:
+            # print(f"DEBUG USAGE: File path '{file_path}' not found in context_map keys: {list(self.context_map.keys())}") # DEBUG
             return []
             
         context_info = self.context_map[file_path]
         usages = []
         
+        # DEBUG: Print relevant context info
+        # print(f"DEBUG USAGE ({symbol} in {file_path}):") # DEBUG
+        # print(f"  Types: {context_info.get('types', 'MISSING')}") # DEBUG
+        # print(f"  Contexts: {context_info.get('contexts', 'MISSING')}") # DEBUG
+
         # Check type usage
-        if symbol in context_info['types']:
+        # print(f"  Checking if '{symbol}' in types...") # DEBUG
+        if symbol in context_info.get('types', {}):
+            # print(f"    Found '{symbol}' in types.") # DEBUG
             usages.append({
                 'type': 'type_usage',
                 'symbol': symbol,
                 'context': 'type'
             })
             
-        # Check function usage
-        if symbol in context_info['contexts']:
+        # Check function/class usage
+        # print(f"  Checking if '{symbol}' in contexts...") # DEBUG
+        found_in_top_level_context = False
+        if symbol in context_info.get('contexts', {}):
+            found_in_top_level_context = True # Mark that we found it directly
+            # print(f"    Found '{symbol}' in contexts.") # DEBUG
             context = context_info['contexts'][symbol]
-            if context['type'] == 'function':
+            # print(f"    Context type: {context.get('type')}") # DEBUG
+            if context.get('type') == 'function':
+                # print(f"      Adding function_usage.") # DEBUG
                 usages.append({
                     'type': 'function_usage',
                     'symbol': symbol,
                     'context': 'function'
                 })
-                
-        # Check class usage
-        if symbol in context_info['contexts']:
-            context = context_info['contexts'][symbol]
-            if context['type'] == 'class':
+            elif context.get('type') == 'class':
+                # print(f"      Adding class_usage.") # DEBUG
                 usages.append({
                     'type': 'class_usage',
                     'symbol': symbol,
                     'context': 'class'
                 })
                 
-        # Check variable usage
-        for name, type_info in context_info['types'].items():
-            if str(type_info) == symbol:
-                usages.append({
-                    'type': 'variable_usage',
-                    'symbol': name,
-                    'context': 'variable'
-                })
+        # Check method usage (if not found as top-level context)
+        if not found_in_top_level_context:
+             # print(f"  Checking if '{symbol}' is a method...") # DEBUG
+             for class_name, class_context in context_info.get('contexts', {}).items():
+                 if class_context.get('type') == 'class' and symbol in class_context.get('methods', {}):
+                     # print(f"    Found method '{symbol}' in class '{class_name}'.") # DEBUG
+                     usages.append({
+                         'type': 'method_usage', # Use specific type
+                         'symbol': symbol,
+                         'context': 'method',
+                         'class': class_name # Add class context
+                     })
+                     break # Assume method names are unique across classes in a file for now
+        
+        # Check property usage (similar logic could be added here if needed)
+        # ...
+
+        # Check variable usage (where variable's type is the symbol)
+        # print(f"  Checking variable usage...") # DEBUG
+        # for name, type_info in context_info.get('types', {}).items():
+        #     if str(type_info) == symbol:
+        #         print(f"    Found variable '{name}' with type '{symbol}'") # DEBUG
+        #         usages.append({
+        #             'type': 'variable_usage',
+        #             'symbol': name,
+        #             'context': 'variable'
+        #         })
                 
+        # print(f"  Final usages for '{symbol}': {usages}") # DEBUG
         return usages
         
     def get_dependency_graph(self) -> Dict[str, Any]:
@@ -310,27 +346,49 @@ class ContextMapper:
             'edges': []
         }
         
-        # Add nodes for all symbols
+        # Add nodes for all top-level types (variables, etc.)
         for name, type_info in context_info['types'].items():
             graph['nodes'].append({
                 'id': name,
-                'type': 'type',
+                'type': 'type', # Generic type node
                 'type_info': str(type_info)
             })
             
+        # Add nodes for top-level contexts (functions, classes) AND their members (methods, properties)
         for name, context in context_info['contexts'].items():
+            # Add node for the main context (function or class)
             graph['nodes'].append({
                 'id': name,
-                'type': context['type'],
+                'type': context['type'], # 'function' or 'class'
                 'context': context
             })
             
-        # Add edges for relationships
-        for rel in context_info['relationships']:
-            graph['edges'].append({
-                'from': rel['from'],
-                'to': rel['to'],
-                'type': rel['type']
-            })
+            # If it's a class, also add nodes for its methods and properties
+            if context['type'] == 'class':
+                # Add method nodes
+                for method_name, method_info in context.get('methods', {}).items():
+                    graph['nodes'].append({
+                        'id': method_name,
+                        'type': 'method', 
+                        'context': method_info # Store params, etc.
+                    })
+                    
+                # Add property nodes
+                for prop_name, prop_info in context.get('properties', {}).items():
+                    graph['nodes'].append({
+                        'id': prop_name,
+                        'type': 'property', 
+                        'context': prop_info # Store type info if available
+                    })
+            
+        # Add edges for relationships (these should already use string IDs)
+        for rel in context_info.get('relationships', []):
+            # Ensure 'from' and 'to' exist before adding edge
+            if 'from' in rel and 'to' in rel:
+                 graph['edges'].append({
+                     'from': rel['from'],
+                     'to': rel['to'],
+                     'type': rel.get('type', 'unknown') # Use get for safety
+                 })
             
         return graph 

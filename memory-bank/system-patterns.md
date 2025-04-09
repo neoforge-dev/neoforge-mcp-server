@@ -1,10 +1,34 @@
 # System Patterns
 
-## Architecture
-- Microservices: HTTP/WS comms, independent scaling
-- Event-Driven: Async messaging, event sourcing
-- Clean: Separation of concerns, SOLID
-- Security-First: Auth boundaries, validation
+## Core Architecture
+- **Style:** Microservices (HTTP/WS).
+- **Principles:** Clean Architecture (Separation of Concerns, DI), Security-First.
+
+## Base Server Pattern (`server.utils.base_server.BaseServer`)
+- **Purpose:** Standardize setup (Config, Log, Monitor, Security) & common middleware across servers.
+- **Key Features:** Manages shared utils, adds standard middleware (CORS, Logging, ErrorHandling, Security, Monitoring), `/health` endpoint.
+
+## Key Design Patterns (Selected)
+- **Registry:** Tool/model mgmt (`server.core`, `server.llm`).
+- **Factory/Strategy:** Tool creation/execution (`server.core`).
+- **Adapter:** External tool integration (`server.code_understanding`).
+- **Decorator:** Used for cross-cutting concerns (e.g., error handling via `@handle_exceptions`).
+- **Command:** Encapsulating operations (e.g., `CommandExecutor`).
+
+## Monitoring Approach (via `BaseServer` & Utils)
+- **Metrics:** Prometheus (via OpenTelemetry SDK).
+- **Tracing:** OpenTelemetry SDK (OTLP Exporter).
+- **Logging:** Structured JSON (correlated via trace IDs where possible).
+
+## Server Component Structure (Conceptual)
+```python
+# BaseServer manages shared components
+class SpecificServer(BaseServer):
+    def _setup_routes(self):
+        # Add server-specific routes here
+        pass
+    # Other server-specific logic
+```
 
 ## Design Patterns
 

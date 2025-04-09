@@ -12,10 +12,10 @@ import time
 import asyncio
 from fastapi.testclient import TestClient
 from server.core.server import app as core_app
-from server.llm.server import app as llm_app
-from server.neod.server import app as neod_app
-from server.neoo.server import app as neoo_app
-from server.neolocal.server import app as neolocal_app
+from server.llm import create_app as create_llm_app
+from server.neod import create_app as create_neod_app
+from server.neoo import create_app as create_neoo_app
+from server.neolocal import create_app as create_neolocal_app
 from server.neollm.server import app as neollm_app
 from server.neodo.server import app as neodo_app
 
@@ -102,25 +102,29 @@ def core_client():
 @pytest.fixture(scope="session")
 def llm_client():
     """Create a test client for the LLM MCP Server."""
+    llm_app = create_llm_app()
     return TestClient(llm_app)
 
 
 @pytest.fixture(scope="session")
 def neod_client():
     """Create a test client for the Neo Development Server."""
+    neod_app = create_neod_app()
     return TestClient(neod_app)
 
 
 @pytest.fixture(scope="session")
 def neoo_client():
     """Create a test client for the Neo Operations Server."""
+    neoo_app = create_neoo_app()
     return TestClient(neoo_app)
 
 
 @pytest.fixture(scope="session")
-def neolocal_client():
-    """Create a test client for the Neo Local Server."""
-    return TestClient(neolocal_app)
+def neolocal_client() -> TestClient:
+    """Create a test client for the NeoLocal server."""
+    app = create_neolocal_app()
+    return TestClient(app)
 
 
 @pytest.fixture(scope="session")

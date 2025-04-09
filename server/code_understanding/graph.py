@@ -74,16 +74,25 @@ class Graph:
         # Convert NodeType enum to string if needed
         node_type = type.value if isinstance(type, NodeType) else type
         node_id = f"{file_path}:{node_type}:{name}"
+        
+        # Ensure properties dictionary exists and includes essential info
+        node_properties = properties or {}
+        node_properties.setdefault('file_path', file_path)
+        node_properties.setdefault('start_line', start_line)
+        node_properties.setdefault('end_line', end_line)
+            
         if node_id not in self.nodes:
             self.nodes[node_id] = Node(
                 id=node_id,
                 name=name,
                 type=node_type,
-                properties=properties or {}
+                properties=node_properties # Pass updated properties
             )
+        # TODO: Consider if properties of existing nodes should be updated?
+        # For now, just return the existing node if found.
         return self.nodes[node_id]
 
-    def add_edge(self, from_node: str, to_node: str, type: Union[str, RelationType], properties: Optional[Dict[str, Any]] = None) -> None:
+    def add_edge(self, from_node: str, to_node: str, type: Union[str, RelationType], properties: Optional[Dict[str, Any]] = None) -> Edge:
         """Add an edge to the graph.
 
         Args:
@@ -91,6 +100,9 @@ class Graph:
             to_node: Target node ID
             type: Edge type
             properties: Optional edge properties
+            
+        Returns:
+            The created Edge object
         """
         if not properties:
             properties = {}
@@ -99,8 +111,9 @@ class Graph:
         edge_type = type.value if isinstance(type, RelationType) else type
         edge = Edge(from_node=from_node, to_node=to_node, type=edge_type, properties=properties)
         self.edges.append(edge)
+        return edge
 
-    def create_edge(self, from_node: Node, to_node: Node, type: RelationType, properties: Optional[Dict[str, Any]] = None) -> None:
+    def create_edge(self, from_node: Node, to_node: Node, type: RelationType, properties: Optional[Dict[str, Any]] = None) -> Edge:
         """Create an edge between two nodes.
 
         Args:
@@ -108,6 +121,9 @@ class Graph:
             to_node: Target node
             type: Edge type
             properties: Optional edge properties
+            
+        Returns:
+            The created Edge object
         """
         if not properties:
             properties = {}
@@ -117,6 +133,7 @@ class Graph:
 
         edge = Edge(from_node=from_node.id, to_node=to_node.id, type=type.value, properties=properties)
         self.edges.append(edge)
+        return edge
 
     def get_node(self, node_id: str) -> Optional[Node]:
         """Get a node by ID.

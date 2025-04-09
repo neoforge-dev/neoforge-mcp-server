@@ -136,11 +136,34 @@ class MockParser:
             program.children.append(func_node)
 
         # Parse classes
-        class_pattern = r'class\s+(\w+)'
-        for match in re.finditer(class_pattern, code_str):
+        # Capture class name (group 1) and body (group 2)
+        class_pattern = r'class\s+(\w+)\s*\{(.*?)\}\s*;?' # Added body capture and optional semicolon
+        method_pattern = r'^\s*(\w+)\s*\([^)]*\)\s*\{' # Matches methods like 'methodName() {'
+
+        for match in re.finditer(class_pattern, code_str, re.DOTALL | re.MULTILINE):
+            class_name = match.group(1)
+            class_body_text = match.group(2)
+            
+            # Create class body node and populate with methods
+            class_body_node = MockNode('class_body', children=[])
+            for method_match in re.finditer(method_pattern, class_body_text, re.MULTILINE):
+                method_name = method_match.group(1)
+                # Create a method_definition MockNode
+                method_node = MockNode(
+                    type='method_definition',
+                    fields={
+                        # Mimic tree-sitter structure where name is a property_identifier field
+                        'name': MockNode('property_identifier', text=method_name) 
+                    },
+                    # Add dummy start/end points if needed later
+                    # start_point=(0,0), end_point=(0,0) 
+                )
+                class_body_node.children.append(method_node)
+
+            # Create the main class declaration node
             class_node = MockNode('class_declaration', fields={
-                'name': MockNode('identifier', text=match.group(1)),
-                'body': MockNode('class_body', children=[])
+                'name': MockNode('identifier', text=class_name),
+                'body': class_body_node # Assign the populated body node
             })
             program.children.append(class_node)
 

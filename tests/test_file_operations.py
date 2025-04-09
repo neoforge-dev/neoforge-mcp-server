@@ -8,13 +8,23 @@ from unittest.mock import patch
 
 # Import the server module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import server
+# Updated import to get functions directly from utils
+from server.utils.file_operations import (
+    read_file,
+    write_file,
+    create_directory,
+    list_directory,
+    move_file,
+    search_files,
+    get_file_info
+)
+# import server # No longer needed
 
 
 def test_read_file(sample_text_file):
     """Test reading file contents."""
     # Test with a valid file
-    result = server.read_file(sample_text_file)
+    result = read_file(sample_text_file)
     
     # Verify result
     assert result["success"] is True
@@ -23,7 +33,7 @@ def test_read_file(sample_text_file):
     assert result["size"] > 0
     
     # Test with a non-existent file
-    result = server.read_file("/path/to/nonexistent/file")
+    result = read_file("/path/to/nonexistent/file")
     assert result["success"] is False
     assert "error" in result
 
@@ -37,14 +47,14 @@ def test_read_file_max_size(temp_dir):
         f.write("x" * 1_000_000)
     
     # Test with a small size limit (100KB)
-    result = server.read_file(large_file_path, max_size_mb=0.1)
+    result = read_file(large_file_path, max_size_mb=0.1)
     
     # Should fail due to size limit
     assert result["success"] is False
     assert "size limit" in result["error"].lower()
     
     # Test with a larger size limit (2MB)
-    result = server.read_file(large_file_path, max_size_mb=2)
+    result = read_file(large_file_path, max_size_mb=2)
     
     # Should succeed
     assert result["success"] is True
@@ -57,7 +67,7 @@ def test_write_file(temp_dir):
     test_content = "Hello, this is a test file content.\nSecond line."
     
     # Write to file
-    result = server.write_file(test_file_path, test_content)
+    result = write_file(test_file_path, test_content)
     
     # Verify result
     assert result["success"] is True
@@ -75,7 +85,7 @@ def test_write_file_create_dirs(temp_dir):
     test_content = "File in nested directory."
     
     # Write to file with directory creation
-    result = server.write_file(nested_file_path, test_content, create_dirs=True)
+    result = write_file(nested_file_path, test_content, create_dirs=True)
     
     # Verify result
     assert result["success"] is True
@@ -92,7 +102,7 @@ def test_create_directory(temp_dir):
     new_dir_path = os.path.join(temp_dir, "new_directory")
     
     # Create directory
-    result = server.create_directory(new_dir_path)
+    result = create_directory(new_dir_path)
     
     # Verify result
     assert result["success"] is True
@@ -100,12 +110,12 @@ def test_create_directory(temp_dir):
     assert os.path.isdir(new_dir_path)
     
     # Test creating a directory that already exists
-    result = server.create_directory(new_dir_path)
+    result = create_directory(new_dir_path)
     assert result["success"] is False  # Should fail
     
     # Test creating a nested directory
     nested_dir_path = os.path.join(temp_dir, "nested", "directory")
-    result = server.create_directory(nested_dir_path)
+    result = create_directory(nested_dir_path)
     assert result["success"] is True
     assert os.path.exists(nested_dir_path)
 
@@ -122,7 +132,7 @@ def test_list_directory(temp_dir):
         f.write("Hidden file")
     
     # List directory without showing hidden files
-    result = server.list_directory(temp_dir, show_hidden=False)
+    result = list_directory(temp_dir, show_hidden=False)
     
     # Verify result
     assert result["success"] is True
@@ -130,7 +140,7 @@ def test_list_directory(temp_dir):
     assert not any(item["name"] == ".hidden" for item in result["contents"])
     
     # List directory showing hidden files
-    result = server.list_directory(temp_dir, show_hidden=True)
+    result = list_directory(temp_dir, show_hidden=True)
     
     # Verify result
     assert result["success"] is True
@@ -156,7 +166,7 @@ def test_move_file(temp_dir):
     
     # Move the file
     destination_path = os.path.join(temp_dir, "destination.txt")
-    result = server.move_file(source_path, destination_path)
+    result = move_file(source_path, destination_path)
     
     # Verify result
     assert result["success"] is True
@@ -169,7 +179,7 @@ def test_move_file(temp_dir):
         assert content == "Test file content"
     
     # Test moving a non-existent file
-    result = server.move_file("/path/to/nonexistent/file", destination_path)
+    result = move_file("/path/to/nonexistent/file", destination_path)
     assert result["success"] is False
 
 
@@ -191,21 +201,21 @@ def test_search_files(temp_dir):
             f.write(f"Content of {file_path}")
     
     # Search for .txt files
-    result = server.search_files(temp_dir, "*.txt", recursive=True)
+    result = search_files(temp_dir, "*.txt", recursive=True)
     
     # Verify result
     assert result["success"] is True
     assert len(result["matches"]) == 3  # test1.txt, hello.txt, subdir/nested.txt
     
     # Search with non-recursive
-    result = server.search_files(temp_dir, "*.txt", recursive=False)
+    result = search_files(temp_dir, "*.txt", recursive=False)
     
     # Verify result - should only find files in the top directory
     assert result["success"] is True
     assert len(result["matches"]) == 2  # test1.txt, hello.txt
     
     # Search with limited results
-    result = server.search_files(temp_dir, "*.*", recursive=True, max_results=2)
+    result = search_files(temp_dir, "*.*", recursive=True, max_results=2)
     
     # Verify result - should be limited to 2 results
     assert result["success"] is True
@@ -215,7 +225,7 @@ def test_search_files(temp_dir):
 def test_get_file_info(sample_text_file):
     """Test getting file information."""
     # Get info for a regular file
-    result = server.get_file_info(sample_text_file)
+    result = get_file_info(sample_text_file)
     
     # Verify result
     assert result["success"] is True
@@ -227,7 +237,7 @@ def test_get_file_info(sample_text_file):
     
     # Get info for a directory
     dir_path = os.path.dirname(sample_text_file)
-    result = server.get_file_info(dir_path)
+    result = get_file_info(dir_path)
     
     # Verify result
     assert result["success"] is True
@@ -235,7 +245,7 @@ def test_get_file_info(sample_text_file):
     assert result["type"] == "directory"
     
     # Get info for a non-existent file
-    result = server.get_file_info("/path/to/nonexistent/file")
+    result = get_file_info("/path/to/nonexistent/file")
     
     # Verify result
     assert result["success"] is True  # The operation succeeded even though file doesn't exist

@@ -40,7 +40,7 @@ def test_add_node(graph):
     assert node.file_path == "test.py"
     assert node.start_line == 0
     assert node.end_line == 0
-    assert node.properties == {}
+    assert node.properties == {'file_path': 'test.py', 'start_line': 0, 'end_line': 0}
     
     # Test node with properties
     node_with_props = graph.add_node(
@@ -51,7 +51,12 @@ def test_add_node(graph):
         end_line=10,
         properties={"key": "value"}
     )
-    assert node_with_props.properties == {"key": "value"}
+    assert node_with_props.properties == {
+        "key": "value", 
+        'file_path': 'test.py', 
+        'start_line': 1, 
+        'end_line': 10
+    }
     
     # Test duplicate node (should return existing node)
     duplicate = graph.add_node(
@@ -65,20 +70,23 @@ def test_add_edge(graph, sample_nodes):
     """Test adding edges to the graph."""
     node1, node2 = sample_nodes
     
-    # Test basic edge addition
-    edge = graph.add_edge(node1, node2, RelationType.CALLS)
-    assert edge.source == node1
-    assert edge.target == node2
-    assert edge.type == RelationType.CALLS
+    # Test basic edge addition - Pass IDs instead of Node objects
+    edge = graph.add_edge(node1.id, node2.id, RelationType.CALLS)
+    # Use correct attribute names and compare IDs
+    assert edge.from_node == node1.id
+    assert edge.to_node == node2.id
+    assert edge.type == RelationType.CALLS.value # Compare with Enum value
     assert edge.properties == {}
     
-    # Test edge with properties
+    # Test edge with properties - Pass IDs
     edge_with_props = graph.add_edge(
-        node2,
-        node1,
-        RelationType.CONTAINS,
+        node2.id, 
+        node1.id, 
+        RelationType.CONTAINS, 
         properties={"line": 15}
     )
+    assert edge_with_props.from_node == node2.id
+    assert edge_with_props.to_node == node1.id
     assert edge_with_props.properties == {"line": 15}
 
 def test_get_node(graph, sample_nodes):
@@ -97,9 +105,9 @@ def test_get_edges(graph, sample_nodes):
     """Test getting edges from the graph."""
     node1, node2 = sample_nodes
     
-    # Add some edges
-    edge1 = graph.add_edge(node1, node2, RelationType.CALLS)
-    edge2 = graph.add_edge(node2, node1, RelationType.CONTAINS)
+    # Add some edges - Pass IDs instead of Node objects
+    edge1 = graph.add_edge(node1.id, node2.id, RelationType.CALLS)
+    edge2 = graph.add_edge(node2.id, node1.id, RelationType.CONTAINS)
     
     # Test getting all edges
     all_edges = graph.get_edges()
@@ -166,7 +174,7 @@ def test_get_nodes_by_file(graph, sample_nodes):
 def test_clear(graph, sample_nodes):
     """Test clearing the graph."""
     node1, node2 = sample_nodes
-    graph.add_edge(node1, node2, RelationType.CALLS)
+    graph.add_edge(node1.id, node2.id, RelationType.CALLS)
     
     # Verify graph has data
     assert len(graph.nodes) == 2
@@ -199,7 +207,12 @@ def test_node_creation():
     assert node.file_path == "test.py"
     assert node.start_line == 10
     assert node.end_line == 20
-    assert node.properties == {"visibility": "public"}
+    assert node.properties == {
+        "visibility": "public",
+        'file_path': 'test.py', 
+        'start_line': 10, 
+        'end_line': 20
+    }
     
     # Test node retrieval
     retrieved_node = graph.get_node(node.id)
@@ -218,18 +231,18 @@ def test_edge_creation():
     node1 = graph.add_node(name="source", type="function", file_path="test.py")
     node2 = graph.add_node(name="target", type="function", file_path="test.py")
     
-    # Create edge
+    # Create edge - Pass IDs using correct keywords
     edge = graph.add_edge(
-        source=node1,
-        target=node2,
+        from_node=node1.id,
+        to_node=node2.id,
         type=RelationType.CALLS,
         properties={"line_number": 15}
     )
     
-    # Verify edge properties
-    assert edge.source == node1
-    assert edge.target == node2
-    assert edge.type == RelationType.CALLS
+    # Verify edge properties - Use correct attribute names
+    assert edge.from_node == node1.id
+    assert edge.to_node == node2.id
+    assert edge.type == RelationType.CALLS.value
     assert edge.properties == {"line_number": 15}
     
     # Test edge retrieval
@@ -254,17 +267,17 @@ def test_edge_filtering():
     node2 = graph.add_node(name="target", type="function", file_path="test.py")
     node3 = graph.add_node(name="other", type="function", file_path="test.py")
     
-    # Create edges
+    # Create edges using correct keywords
     edge1 = graph.add_edge(
-        source=node1,
-        target=node2,
+        from_node=node1.id,
+        to_node=node2.id,
         type=RelationType.CALLS,
         properties={"line_number": 15}
     )
     
     edge2 = graph.add_edge(
-        source=node2,
-        target=node3,
+        from_node=node2.id,
+        to_node=node3.id,
         type=RelationType.REFERENCES,
         properties={"line_number": 20}
     )
@@ -348,8 +361,8 @@ def test_edge_properties():
         "context": "function_call"
     }
     edge = graph.add_edge(
-        source=node1,
-        target=node2,
+        from_node=node1.id,
+        to_node=node2.id,
         type=RelationType.CALLS,
         properties=properties
     )
@@ -394,5 +407,5 @@ def test_relation_types():
     
     # Verify no unexpected relation types
     relation_types = {t.value for t in RelationType}
-    expected_types = {"imports", "inherits", "contains", "calls", "references"}
+    expected_types = {"imports", "inherits", "contains", "calls", "references", "has_attribute"}
     assert relation_types == expected_types 

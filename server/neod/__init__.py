@@ -2,6 +2,8 @@
 Neo Development MCP Server package.
 """
 
-from .server import server, app
+# Use the app factory pattern
+from .server import create_app
 
-__all__ = ["server", "app"] 
+# Expose the factory function
+__all__ = ["create_app"] 

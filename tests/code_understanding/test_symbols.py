@@ -172,9 +172,14 @@ def test_node_text_handling(extractor):
 
 def test_error_handling(extractor):
     """Test error handling."""
-    # Test with invalid tree
+    # Test with None tree
     result = extractor.extract_symbols(None)
-    assert result == {'symbols': {}, 'references': {}}
+    expected_result = {
+        'functions': [],
+        'classes': [],
+        'variables': []
+    }
+    assert result == expected_result
     
     # Test with invalid node
     extractor._process_node(None)

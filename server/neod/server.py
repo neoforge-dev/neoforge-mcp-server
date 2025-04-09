@@ -1,385 +1,82 @@
 """
-Neo Development MCP Server - Provides development tools and functionality.
+Neo Development MCP Server - Provides development-related tools.
 """
 
-from typing import Any, Dict, Optional, List
-from fastapi import Depends, HTTPException
+from typing import Dict, Any, Optional, List
+from fastapi import Depends, Request, FastAPI
+from pydantic import BaseModel
+import os
 
-from ..utils.base_server import BaseServer
-from ..utils.error_handling import handle_exceptions
-from ..utils.security import ApiKey
+# Import BaseServer and utilities
+from server.utils.base_server import BaseServer
+from server.utils.error_handling import handle_exceptions, MCPError
+# Security handled by BaseServer
 
-class NeoDevelopmentServer(BaseServer):
-    """Neo Development MCP Server implementation."""
-    
+# --- Pydantic Models (if any specific to NeoDev) ---
+# Example: Maybe models for workspace management or code analysis results
+class WorkspaceInfo(BaseModel):
+    name: str
+    path: str
+    # Add other relevant info
+
+class ListWorkspacesResponse(BaseModel):
+    workspaces: List[WorkspaceInfo]
+
+# --- NeoDev Server Class (Refactored) ---
+
+class NeoDevServer(BaseServer):
+    """Neo Development Server inheriting from BaseServer."""
+
     def __init__(self):
-        """Initialize Neo Development MCP Server."""
-        super().__init__("neod_mcp")
-        
-        # Register routes
-        self.register_routes()
-        
-    def register_routes(self) -> None:
-        """Register API routes."""
-        super().register_routes()
-        
-        @self.app.post("/api/v1/generate-code")
-        @handle_exceptions()
-        async def generate_code(
-            prompt: str,
-            language: str,
-            api_key: ApiKey = Depends(self.get_api_key)
-        ) -> Dict[str, Any]:
-            """Generate code based on a prompt.
-            
-            Args:
-                prompt: Code generation prompt
-                language: Programming language
-                api_key: Validated API key
-                
-            Returns:
-                Generated code
-            """
-            # Check permissions
-            if not self.security.check_permission(api_key, "generate:code"):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Insufficient permissions"
-                )
-                
-            # Check if code generation is enabled
-            if not self.config.enable_code_generation:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Code generation is disabled"
-                )
-                
-            # Generate code
-            with self.monitor.span_in_context(
-                "generate_code",
-                attributes={
-                    "language": language,
-                    "prompt_length": len(prompt)
-                }
-            ):
-                try:
-                    # TODO: Implement code generation
-                    return {
-                        "status": "success",
-                        "code": "// Generated code placeholder",
-                        "language": language
-                    }
-                    
-                except Exception as e:
-                    self.logger.error(
-                        "Code generation failed",
-                        error=str(e),
-                        language=language,
-                        prompt_length=len(prompt)
-                    )
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Code generation failed: {str(e)}"
-                    )
-                    
-        @self.app.post("/api/v1/analyze-code")
-        @handle_exceptions()
-        async def analyze_code(
-            code: str,
-            language: str,
-            api_key: ApiKey = Depends(self.get_api_key)
-        ) -> Dict[str, Any]:
-            """Analyze code for issues and improvements.
-            
-            Args:
-                code: Code to analyze
-                language: Programming language
-                api_key: Validated API key
-                
-            Returns:
-                Analysis results
-            """
-            # Check permissions
-            if not self.security.check_permission(api_key, "analyze:code"):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Insufficient permissions"
-                )
-                
-            # Check if code analysis is enabled
-            if not self.config.enable_code_analysis:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Code analysis is disabled"
-                )
-                
-            # Analyze code
-            with self.monitor.span_in_context(
-                "analyze_code",
-                attributes={
-                    "language": language,
-                    "code_length": len(code)
-                }
-            ):
-                try:
-                    # TODO: Implement code analysis
-                    return {
-                        "status": "success",
-                        "issues": [],
-                        "suggestions": [],
-                        "language": language
-                    }
-                    
-                except Exception as e:
-                    self.logger.error(
-                        "Code analysis failed",
-                        error=str(e),
-                        language=language,
-                        code_length=len(code)
-                    )
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Code analysis failed: {str(e)}"
-                    )
-                    
-        @self.app.post("/api/v1/generate-tests")
-        @handle_exceptions()
-        async def generate_tests(
-            code: str,
-            language: str,
-            api_key: ApiKey = Depends(self.get_api_key)
-        ) -> Dict[str, Any]:
-            """Generate tests for code.
-            
-            Args:
-                code: Code to generate tests for
-                language: Programming language
-                api_key: Validated API key
-                
-            Returns:
-                Generated tests
-            """
-            # Check permissions
-            if not self.security.check_permission(api_key, "generate:tests"):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Insufficient permissions"
-                )
-                
-            # Check if test generation is enabled
-            if not self.config.enable_test_generation:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Test generation is disabled"
-                )
-                
-            # Generate tests
-            with self.monitor.span_in_context(
-                "generate_tests",
-                attributes={
-                    "language": language,
-                    "code_length": len(code)
-                }
-            ):
-                try:
-                    # TODO: Implement test generation
-                    return {
-                        "status": "success",
-                        "tests": "// Generated tests placeholder",
-                        "language": language
-                    }
-                    
-                except Exception as e:
-                    self.logger.error(
-                        "Test generation failed",
-                        error=str(e),
-                        language=language,
-                        code_length=len(code)
-                    )
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Test generation failed: {str(e)}"
-                    )
-                    
-        @self.app.post("/api/v1/generate-docs")
-        @handle_exceptions()
-        async def generate_docs(
-            code: str,
-            language: str,
-            api_key: ApiKey = Depends(self.get_api_key)
-        ) -> Dict[str, Any]:
-            """Generate documentation for code.
-            
-            Args:
-                code: Code to generate documentation for
-                language: Programming language
-                api_key: Validated API key
-                
-            Returns:
-                Generated documentation
-            """
-            # Check permissions
-            if not self.security.check_permission(api_key, "generate:docs"):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Insufficient permissions"
-                )
-                
-            # Check if documentation generation is enabled
-            if not self.config.enable_documentation:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Documentation generation is disabled"
-                )
-                
-            # Generate documentation
-            with self.monitor.span_in_context(
-                "generate_docs",
-                attributes={
-                    "language": language,
-                    "code_length": len(code)
-                }
-            ):
-                try:
-                    # TODO: Implement documentation generation
-                    return {
-                        "status": "success",
-                        "docs": "# Generated documentation placeholder",
-                        "language": language
-                    }
-                    
-                except Exception as e:
-                    self.logger.error(
-                        "Documentation generation failed",
-                        error=str(e),
-                        language=language,
-                        code_length=len(code)
-                    )
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Documentation generation failed: {str(e)}"
-                    )
-                    
-        @self.app.post("/api/v1/debug")
-        @handle_exceptions()
-        async def debug_code(
-            code: str,
-            language: str,
-            api_key: ApiKey = Depends(self.get_api_key)
-        ) -> Dict[str, Any]:
-            """Debug code and identify issues.
-            
-            Args:
-                code: Code to debug
-                language: Programming language
-                api_key: Validated API key
-                
-            Returns:
-                Debug results
-            """
-            # Check permissions
-            if not self.security.check_permission(api_key, "debug:code"):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Insufficient permissions"
-                )
-                
-            # Check if debugging is enabled
-            if not self.config.enable_debugging:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Debugging is disabled"
-                )
-                
-            # Debug code
-            with self.monitor.span_in_context(
-                "debug_code",
-                attributes={
-                    "language": language,
-                    "code_length": len(code)
-                }
-            ):
-                try:
-                    # TODO: Implement debugging
-                    return {
-                        "status": "success",
-                        "issues": [],
-                        "suggestions": [],
-                        "language": language
-                    }
-                    
-                except Exception as e:
-                    self.logger.error(
-                        "Debugging failed",
-                        error=str(e),
-                        language=language,
-                        code_length=len(code)
-                    )
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Debugging failed: {str(e)}"
-                    )
-                    
-        @self.app.post("/api/v1/profile")
-        @handle_exceptions()
-        async def profile_code(
-            code: str,
-            language: str,
-            api_key: ApiKey = Depends(self.get_api_key)
-        ) -> Dict[str, Any]:
-            """Profile code for performance issues.
-            
-            Args:
-                code: Code to profile
-                language: Programming language
-                api_key: Validated API key
-                
-            Returns:
-                Profiling results
-            """
-            # Check permissions
-            if not self.security.check_permission(api_key, "profile:code"):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Insufficient permissions"
-                )
-                
-            # Check if profiling is enabled
-            if not self.config.enable_profiling:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Profiling is disabled"
-                )
-                
-            # Profile code
-            with self.monitor.span_in_context(
-                "profile_code",
-                attributes={
-                    "language": language,
-                    "code_length": len(code)
-                }
-            ):
-                try:
-                    # TODO: Implement profiling
-                    return {
-                        "status": "success",
-                        "performance_issues": [],
-                        "suggestions": [],
-                        "language": language
-                    }
-                    
-                except Exception as e:
-                    self.logger.error(
-                        "Profiling failed",
-                        error=str(e),
-                        language=language,
-                        code_length=len(code)
-                    )
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Profiling failed: {str(e)}"
-                    )
+        """Initialize Neo Development Server."""
+        # Use appropriate app_name, check config if necessary
+        super().__init__(app_name="neod_server")
+        # Initialize NeoDev specific components if any
+        # e.g., self.workspace_manager = WorkspaceManager(config=self.config)
+        self.logger.info("Neo Development Server Initialized")
 
-# Create server instance
-server = NeoDevelopmentServer()
-app = server.get_app() 
+    def register_routes(self) -> None:
+        """Register NeoDev specific routes after base routes."""
+        super().register_routes()
+
+        # Example NeoDev routes (replace with actual ones)
+        @self.app.get("/api/v1/workspaces", response_model=ListWorkspacesResponse, tags=["NeoDev"])
+        @handle_exceptions()
+        async def list_workspaces(
+            request: Request,
+            # TODO: Add security Depends(self.get_api_key)
+        ) -> ListWorkspacesResponse:
+            """List available development workspaces."""
+            logger = request.state.log_manager
+            logger.info("Received request to list workspaces")
+            # Placeholder logic - replace with actual workspace manager call
+            workspaces = [
+                WorkspaceInfo(name="project-a", path="/path/to/project-a"),
+                WorkspaceInfo(name="project-b", path="/path/to/project-b"),
+            ]
+            logger.info(f"Returning {len(workspaces)} workspaces")
+            return ListWorkspacesResponse(workspaces=workspaces)
+
+        @self.app.post("/api/v1/analyze/{feature}", tags=["NeoDev"])
+        @handle_exceptions()
+        async def analyze_feature(
+            feature: str,
+            request: Request,
+            # TODO: Add security Depends(self.get_api_key)
+        ) -> Dict[str, Any]:
+            """Analyze a specific feature (placeholder)."""
+            logger = request.state.log_manager
+            logger.info(f"Received request to analyze feature: {feature}")
+            # Placeholder logic
+            analysis_result = {"status": "ok", "feature": feature, "complexity": "medium"}
+            logger.info(f"Analysis complete for feature: {feature}")
+            return analysis_result
+
+# App Factory pattern
+def create_app() -> FastAPI:
+    server = NeoDevServer()
+    return server.app
+
+# Comment out or remove direct instantiation if present
+# server = NeoDevServer()
+# app = server.app 
