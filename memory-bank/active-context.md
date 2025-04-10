@@ -1,31 +1,45 @@
 # Active Context
 
-## Current Focus
-- Phase 2: BaseServer Migration & Test Coverage
-- Fixing 3 failing tests:
-  1. test_list_sessions (status missing)
-  2. test_async_await_support
-  3. test_export_variants
+## Phase
+- Phase 2: BaseServer Migration & >90% Test Coverage.
 
-## Recent Changes
-- All servers migrated to BaseServer
-- Basic health tests passing
-- Enhanced JS parser
+## Current Task
+- Fix remaining failing tests in `tests/llm/test_llm_server.py`.
+  - `test_generate_endpoint_default_model` (ValidationError)
+  - `test_generate_model_not_found` (MCPError instead of NotFoundError)
+- *Previously addressed in this session:* `test_list_models_unauthorized`, `test_list_models_endpoint`, `test_tokenize_unauthorized`, `test_tokenize_model_not_found`.
 
-## Next Steps
-1. Fix test_list_sessions
-2. Address JS parser tests
-3. Increase test coverage
+## Other Known Failures (To Address Next)
+- `test_list_sessions` (Location TBD - likely NeoOps or Core)
+- JS Parser: `test_async_await_support`, `test_export_variants` (Location TBD)
 
-## Status
-- BaseServer: Done
-- Server Migration: 4/7 Complete
-- Test Coverage: ~9% (Target: >90%)
+## Recent System Changes (Impact Summary)
+- **Routing:** Placeholder `/api/v1/models` removed from `BaseServer` to fix conflict.
+- **Error Handling:**
+    - `BaseServer` uses `ErrorHandlerMiddleware`.
+    - Endpoints use `@handle_exceptions` & specific `MCPError` subclasses (`AuthorizationError`, `NotFoundError`).
+    - LLM `tokenize` & `generate` updated to raise `NotFoundError` for missing models.
+- **Security:** `SecurityManager` logic updated (`check_permission` includes role check).
+- **Testing:**
+    - LLM tests updated for new error/response structures.
+    - `TestClient` usage standardized in LLM tests (`raise_server_exceptions=False` for checking HTTP responses).
+
+## Next Steps (Priority Order)
+1. Fix `test_generate_endpoint_default_model` (LLM Server).
+2. Fix `test_generate_model_not_found` (LLM Server).
+3. Re-run all LLM tests (`tests/llm/test_llm_server.py`).
+4. Investigate/fix `test_list_sessions`.
+5. Investigate/fix JS Parser tests (`test_async_await_support`, `test_export_variants`).
+6. Systematically increase test coverage across all servers (Target: >90%).
+
+## Test Status / Coverage
+- LLM Server (`tests/llm/test_llm_server.py`): 11/14 passing.
+- Overall Coverage: ~9% (Target: >90%).
 
 ## Active Decisions
-- Pydantic for NeoDO validation
-- Centralized NeoDO mocking
-- JS parser fixes implemented
+- Standardized error handling via `MCPError` and `ErrorHandlerMiddleware`.
+- Using `ApiKey` dataclass and explicit permissions in `SecurityManager`.
+- `loguru` `bind` method expected by middleware; mocks need to support this.
 
 # --- Active Context ---
 # Status: All servers migrated. Basic tests passing for all servers.

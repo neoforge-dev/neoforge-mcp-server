@@ -60,11 +60,13 @@ class ServerConfig:
         anthropic_api_key: Optional[str] = None,
         openai_api_key: Optional[str] = None,
         do_token: Optional[str] = None,
-        api_keys: Optional[Dict[str, str]] = None,
+        api_keys: Optional[Dict[str, Dict[str, Any]]] = None,
         # Security settings
         enable_auth: bool = False,
         auth_token: Optional[str] = None,
         allowed_origins: List[str] = None,
+        # LLM Model Definitions (Added)
+        llm_models: Optional[List[Dict[str, Any]]] = None,
         # Session settings (Added)
         enable_sessions: bool = False,
         session_secret: Optional[str] = None,
@@ -200,6 +202,9 @@ class ServerConfig:
         self.enable_auth = enable_auth
         self.auth_token = auth_token
         self.allowed_origins = allowed_origins or []
+        
+        # LLM Model Definitions (Added)
+        self.llm_models = llm_models or [] # Default to empty list
         
         # Session settings (Added)
         self.enable_sessions = enable_sessions
@@ -344,23 +349,41 @@ class ConfigManager:
         return os.environ.get(env_key)
         
     def _apply_env_overrides(self, config: Dict[str, Any]) -> None:
-        """Apply environment variable overrides."""
-        for key in config:
-            env_value = self._get_env_value(key)
+        """Recursively apply environment variable overrides to config dict."""
+        for key, value in config.items():
+            env_var = f"{self.env_prefix}{key.upper()}"
+            env_value = self._get_env_value(env_var)
+            
             if env_value is not None:
-                # Convert environment value to appropriate type
-                current_value = config[key]
-                if isinstance(current_value, bool):
-                    config[key] = env_value.lower() in ('true', '1', 'yes')
-                elif isinstance(current_value, int):
-                    config[key] = int(env_value)
-                elif isinstance(current_value, float):
-                    config[key] = float(env_value)
-                elif isinstance(current_value, (list, set)):
-                    config[key] = env_value.split(',')
-                else:
-                    config[key] = env_value
+                try:
+                    # Attempt to parse based on original type
+                    original_type = type(value)
+                    if original_type == bool:
+                        config[key] = env_value.lower() in ('true', '1', 'yes')
+                    elif original_type == int:
+                        config[key] = int(env_value)
+                    elif original_type == float:
+                        config[key] = float(env_value)
+                    elif original_type == list or original_type == set:
+                        # Simple comma-separated list for env vars
+                        items = [item.strip() for item in env_value.split(',')]
+                        config[key] = set(items) if original_type == set else items
+                    # Add handling for dict if needed (e.g., JSON string)
+                    # elif original_type == dict:
+                    #     try:
+                    #         config[key] = json.loads(env_value)
+                    #     except json.JSONDecodeError:
+                    #         print(f"Warning: Env var {env_var} is not valid JSON for dict field {key}. Ignoring override.")
+                    else:
+                        # Default to string
+                        config[key] = env_value
+                except (ValueError, TypeError) as e:
+                    print(f"Warning: Could not parse env var {env_var} for key {key}. Error: {e}. Using config file value.")
                     
+            elif isinstance(value, dict):
+                # Recurse into nested dictionaries
+                self._apply_env_overrides(value)
+
     def _validate_config(self, config: Dict[str, Any]) -> None:
         """Validate configuration values."""
         required_fields = {'name', 'port'}

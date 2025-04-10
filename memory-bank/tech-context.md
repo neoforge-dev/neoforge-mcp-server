@@ -1,33 +1,24 @@
 # Tech Context
 
-## Stack
-- Python 3.11+, FastAPI
-- Pytest (+ asyncio, cov)
-- Ruff, Mypy
-- OpenTelemetry, Prometheus
-- PyYAML, Pydantic, python-dotenv
-- Key Libs: psutil, tiktoken, tree-sitter, httpx
+## Core Stack
+- **Lang/Framework:** Python 3.11+, FastAPI, Pydantic
+- **Testing:** Pytest (+ asyncio, cov, mock)
+- **Code Quality:** Ruff, Mypy
+- **Config:** PyYAML, python-dotenv
+- **Monitoring:** OpenTelemetry SDK, Prometheus client (planned)
+- **Logging:** Loguru
+- **HTTP:** httpx
+- **Key Libs:** psutil, tiktoken, tree-sitter
 
 ## Setup
-```bash
-source venv/bin/activate
-pip install -r requirements.txt
-```
+- Activate venv: `source .venv/bin/activate`
+- Install deps: `pip install -r requirements.txt`
 
-## Config
-- Secrets: .env
-- Servers: config/<server_name>.yml
-- Security: server/utils/security.py
+## Config Files
+- Secrets: `.env`
+- Server Settings: `config/<server_name>.yml`
+- API Keys: In `.yml`, managed by `SecurityManager`
 
-## Goals
-- TDD >90% coverage
-- Security (Val, AuthN/Z)
-- Perf (<100ms API, <512MB RAM)
-- Scalability design
-
-## Future
-- K8s Integration
-- Cloud Deployment
-- More LLM Integrations
-- Enhanced Security
-- Advanced Monitoring
+## Goals (Summary)
+- **Primary:** TDD >90% coverage.
+- **Secondary:** Security, Perf (<100ms API), Scalability.

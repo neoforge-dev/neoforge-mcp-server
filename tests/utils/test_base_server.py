@@ -50,8 +50,10 @@ def test_base_server_rate_limit(mock_dependencies): # Depends on conftest fixtur
 
     # Create a NEW limiter instance for this test scope to avoid state pollution
     test_limiter = Limiter(key_func=get_remote_address, enabled=True)
-    with patch('server.utils.base_server.limiter', new=test_limiter)
-         patch.dict(test_limiter._limits, {}, clear=True): # Clear limits for this specific instance
+    with (
+        patch('server.utils.base_server.limiter', new=test_limiter),
+        patch.dict(test_limiter._limits, {}, clear=True)
+    ): # Correct syntax: Colon after closing parenthesis for multi-line with
         
         # Instantiate the server using the mocked dependencies
         server = BaseServer(app_name="test_base_server_rate_limit")

@@ -289,7 +289,22 @@ class SecurityManager:
         namespace = permission.split(":")[0]
         if f"{namespace}:*" in api_key.scopes:
             return True
-            
+
+        # Check permissions granted by the key's roles
+        for role_name in api_key.roles:
+            if role_name in self.roles:  # Check if the role exists in the manager's config
+                role_scopes = self.roles[role_name]
+                # Check for wildcard scope in the role definition
+                if "*" in role_scopes or "*:*" in role_scopes: # Check role's global wildcard
+                     return True
+                # Check for exact scope match in the role definition
+                if permission in role_scopes:
+                    return True
+                # Check for namespace wildcard scope in the role definition
+                if f"{namespace}:*" in role_scopes:
+                    return True
+
+        # No matching scope found directly or via roles
         return False
         
     def require_scope(self, required_scope: str):

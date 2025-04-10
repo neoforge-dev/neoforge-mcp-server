@@ -60,6 +60,34 @@ docker-down:
 docker-build:
 	$(DOCKER_COMPOSE) build
 
+# --- LLM Server Docker Commands ---
+# Define image name and tag
+LLM_IMAGE_NAME ?= llm-server
+LLM_IMAGE_TAG ?= latest
+
+docker-build-llm:
+	@echo "Building LLM server Docker image ($(LLM_IMAGE_NAME):$(LLM_IMAGE_TAG))..."
+	docker build -t $(LLM_IMAGE_NAME):$(LLM_IMAGE_TAG) -f llm.Dockerfile .
+
+docker-run-llm: docker-build-llm
+	@echo "Running LLM server Docker container ($(LLM_IMAGE_NAME):$(LLM_IMAGE_TAG))..."
+	# Run in detached mode (-d), remove container on exit (--rm)
+	# Map host port 7444 to container port 7444
+	# Pass necessary environment variables (e.g., API keys) using -e
+	# Mount volumes if needed (e.g., for local models) using -v
+	docker run -d --rm -p 7444:7444 \
+		# Example: Pass OpenAI API key if needed by the container
+		# -e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+		# Example: Mount a local models directory if needed
+		# -v $(HOME)/.cache/huggingface:/root/.cache/huggingface \
+		--name $(LLM_IMAGE_NAME) $(LLM_IMAGE_NAME):$(LLM_IMAGE_TAG)
+
+docker-stop-llm:
+	@echo "Stopping LLM server Docker container ($(LLM_IMAGE_NAME))..."
+	docker stop $(LLM_IMAGE_NAME) || true # Ignore error if already stopped
+
+# --- End LLM Server Docker Commands ---
+
 # Code quality commands
 lint: setup
 	. $(VENV)/bin/activate && $(PYLINT) server tests

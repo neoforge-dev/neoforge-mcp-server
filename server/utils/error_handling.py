@@ -82,6 +82,16 @@ class ConflictError(MCPError):
             details=details
         )
 
+class ConfigurationError(MCPError):
+    """Configuration error."""
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(
+            message=message,
+            status_code=500, # Configuration issues are internal server errors
+            error_code="CONFIGURATION_ERROR",
+            details=details
+        )
+
 class SecurityError(MCPError):
     """Security violation error."""
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):

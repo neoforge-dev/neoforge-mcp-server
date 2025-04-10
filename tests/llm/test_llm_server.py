@@ -522,11 +522,12 @@ def test_generate_endpoint(client: TestClient, test_llm_server_integrated: LLMSe
     assert response_data["model_name"] == target_model_name
     assert response_data["tokens_generated"] == len(expected_tokens_list)
 
-def test_generate_endpoint_default_model(client: TestClient, test_llm_server_integrated: LLMServer):
+def test_generate_endpoint_default_model(test_llm_server_minimal_patches):
     """Test the /api/v1/generate endpoint using the default model."""
+    server, client = test_llm_server_minimal_patches # Unpack server and client
     valid_api_key = "test-api-key"
     headers = {"X-API-Key": valid_api_key}
-    model_manager = test_llm_server_integrated._test_model_manager
+    model_manager = server._test_model_manager # Use server from fixture
     expected_model = model_manager.get_model("default") # test-model-1
     mock_generate_method = expected_model.generate
     mock_tokenize_method = expected_model.tokenizer.encode
@@ -557,21 +558,30 @@ def test_generate_endpoint_default_model(client: TestClient, test_llm_server_int
     assert response_data["model_name"] == expected_model.name
     assert response_data["tokens_generated"] == len(expected_tokens_list)
 
-def test_generate_model_not_found(client: TestClient, test_llm_server_integrated: LLMServer):
-    """Test generate endpoint raises NotFoundError (404) when model doesn't exist."""
+def test_generate_model_not_found(test_llm_server_minimal_patches):
+    """Test generate endpoint returns 404 when model doesn't exist."""
+    server, client = test_llm_server_minimal_patches # Unpack server and client
     valid_api_key = "test-api-key"
     headers = {"X-API-Key": valid_api_key}
-    model_manager = test_llm_server_integrated._test_model_manager
+    model_manager = server._test_model_manager # Use server from fixture
 
     original_get_model = model_manager.get_model
+    # Configure mock to raise ValueError as the endpoint expects
     model_manager.get_model = MagicMock(side_effect=ValueError("Model 'who-dis' not found."))
 
     request_data = {"prompt": "Test prompt", "model_name": "who-dis"}
 
-    with pytest.raises(NotFoundError) as exc_info:
-        client.post("/api/v1/generate", json=request_data, headers=headers)
-    assert f"Model not found: who-dis" in str(exc_info.value)
-    assert exc_info.value.error_code == "NOT_FOUND"
+    # Make the request and check the HTTP response
+    response = client.post("/api/v1/generate", json=request_data, headers=headers)
+
+    assert response.status_code == 404
+    response_data = response.json()
+    assert "error" in response_data
+    error_details = response_data["error"]
+    assert error_details["code"] == "NOT_FOUND"
+    assert "Model not found: who-dis" in error_details["message"]
+    # Check if details are present if needed
+    # assert error_details["details"]["model_name"] == "who-dis"
 
     model_manager.get_model = original_get_model # Restore
 

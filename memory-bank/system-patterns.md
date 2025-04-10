@@ -1,30 +1,24 @@
 # System Patterns
 
-## Architecture
-- Microservices (HTTP/WS)
-- Clean Architecture (SoC, DI)
-- Security-First
+## Architecture & BaseServer
+- **Style:** Microservices (HTTP/WS) via FastAPI.
+- **Principles:** Clean Architecture (SoC, DI), Security-First.
+- **`BaseServer`:** Standardizes Config, Logging(Loguru), Monitoring(OTel), Middleware(Error, CORS, Gzip, RateLimit), `/health` route.
 
-## BaseServer Pattern
-- Standardizes setup (Config, Log, Monitor)
-- Provides: /health, utils, middleware
+## Core Design Patterns
+- **Registry:** Tool/model management.
+- **Factory/Strategy:** Dynamic adapter/instance creation.
+- **Adapter:** Wrap external libs/tools.
+- **Decorator:** Cross-cutting concerns (e.g., `@handle_exceptions`).
+- **Dependency Injection:** FastAPI (`Depends`) for security, state.
 
-## Design Patterns
-- Registry: Tool/model mgmt
-- Factory/Strategy: Tool creation
-- Adapter: External tools
-- Decorator: Cross-cutting
-- Command: Operations
+## Monitoring & Logging
+- OpenTelemetry (Metrics/Tracing).
+- Structured JSON Logging (Loguru).
 
-## Monitoring
-- OpenTelemetry (Metrics/Tracing)
-- JSON Logging
+## Server Implementation Pattern
+1. Inherit `BaseServer`.
+2. Implement `register_routes` for specific endpoints.
+3. Access managers via `request.state` or `Depends`.
 
-## Server Structure
-```python
-class SpecificServer(BaseServer):
-    def _setup_routes(self):
-        pass
-```
-
-*See `tech-context.md` for specific libraries.* 
+*Libraries: `tech-context.md`* 

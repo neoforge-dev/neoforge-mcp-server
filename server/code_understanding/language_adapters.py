@@ -304,26 +304,29 @@ class JavaScriptParserAdapter(BaseParserAdapter):
             tree = self.parse(code_bytes) 
             if not tree or not tree.root_node:
                 raise ValueError("Parsing resulted in an empty tree.")
-                
-            # Use the internal feature extraction method, passing code_bytes
-            features = self._extract_features(tree.root_node, code_bytes)
+            
+            # --- REMOVE DEBUG LOGGING FOR has_error ---
+            # self.logger.debug(f"Tree parsed. Root node: {tree.root_node.type}, Has Error: {tree.root_node.has_error}")
+            # --- END DEBUG LOGGING ---
+            
+            # --- Initialize features dict HERE, including has_errors --- 
+            features = {
+                 'functions': [], 'classes': [], 'variables': [], 'imports': [], 'exports': [],
+                 'has_errors': tree.root_node.has_error, # Initialize directly
+                 'errors': [] 
+             }
+             
+            # Pass the features dict to be modified in-place
+            self._extract_features(tree.root_node, code_bytes, features)
 
-            # --- Corrected Syntax Error Handling ---
-            errors = []
-            if tree.root_node.has_error:
-                 self.logger.warning("Syntax errors detected in the tree by tree-sitter.")
-                 # --- Set has_errors flag based on the fundamental tree signal ---
-                 features['has_errors'] = True 
-                 # --- End Flag Setting ---
+            # --- Simplified Syntax Error Handling ---
+            if features['has_errors']: # Check the flag we already set
+                 self.logger.warning("Syntax errors detected.")
                  # Call the method to collect specific errors (might return empty list)
                  errors = self._collect_syntax_errors(tree.root_node, code_bytes)
                  # Assign collected errors, even if empty
                  features['errors'] = errors 
-                 # Original/Problematic logic:
-                 # if errors:
-                 #      features['has_errors'] = True # Only set if specific errors found
-                 #      features['errors'] = errors
-            # --- End Correction ---
+            # --- End Simplified Handling ---
 
             return features
         except ValueError as e:
@@ -392,14 +395,16 @@ class JavaScriptParserAdapter(BaseParserAdapter):
          find_errors_recursive(node) # Start recursion
          return errors
             
-    def _extract_features(self, node: Node, code: Union[str, bytes]) -> Dict[str, List[Dict]]:
-        features = {
-            'functions': [],
-            'classes': [],
-            'variables': [],
-            'imports': [],
-            'exports': []
-        }
+    def _extract_features(self, node: Node, code: Union[str, bytes], features: Dict[str, List[Dict]]) -> None:
+        """Extract features directly into the provided features dictionary."""
+        # Removed internal features initialization
+        # features = {
+        #     'functions': [],
+        #     'classes': [],
+        #     'variables': [],
+        #     'imports': [],
+        #     'exports': []
+        # }
 
         # Keep track of parent node during traversal for context (like catch clause)
         parent_map = {node: None}
@@ -544,20 +549,8 @@ class JavaScriptParserAdapter(BaseParserAdapter):
 
         # Start traversal from the provided node (usually the root)
         traverse(node)
+        # No return needed as the dictionary is modified in-place
 
-        # Deduplicate functions based on name and line number just in case
-        # Simple deduplication - might need refinement for complex cases
-        seen_functions = set()
-        deduped_functions = []
-        for func in features['functions']:
-            key = (func.get('name'), func.get('line'))
-            if key not in seen_functions:
-                seen_functions.add(key)
-                deduped_functions.append(func)
-        features['functions'] = deduped_functions
-
-        return features
-        
     def _extract_function(self, node: Node, code: Union[str, bytes]) -> Dict:
         """Extract function details (name, parameters, async status)."""
         # Initialize func_info dict
@@ -720,8 +713,7 @@ class JavaScriptParserAdapter(BaseParserAdapter):
             'is_generator': False,
             'is_getter': False,
             'is_setter': False,
-            # Known Limitation: super() call detection removed due to instability.
-            # 'calls_super': False,
+            'calls_super': False,
             'line': node.start_point[0] + 1,
             'column': node.start_point[1],
             'end_line': node.end_point[0] + 1,
@@ -811,6 +803,28 @@ class JavaScriptParserAdapter(BaseParserAdapter):
             method_info['body_start_line'] = body_node.start_point[0] + 1
             method_info['body_end_line'] = body_node.end_point[0] + 1
 
+            # --- ADD SUPER() CALL DETECTION --- 
+            calls_super = False
+            queue = [body_node]
+            visited = set()
+            while queue:
+                current = queue.pop(0)
+                if current.id in visited:
+                    continue
+                visited.add(current.id)
+                
+                # Look for a call expression whose function is the 'super' keyword
+                if current.type == 'call_expression':
+                    func_node = current.child_by_field_name('function')
+                    if func_node and func_node.type == 'super':
+                        calls_super = True
+                        break # Found it, no need to search further
+                
+                # Traverse children
+                queue.extend(current.children)
+            method_info['calls_super'] = calls_super
+            # --- END SUPER() CALL DETECTION ---
+            
         # Note: Return type extraction might need more logic if types are specified
 
         # Check for try-catch blocks
@@ -825,6 +839,14 @@ class JavaScriptParserAdapter(BaseParserAdapter):
 
     def _extract_field(self, node: Node, code: Union[str, bytes]) -> Dict:
         """Extract field information with support for private fields."""
+        # --- REMOVE DEBUG LOGGING ---
+        # self.logger.debug(f"Entering _extract_field for node type: {node.type} at line {node.start_point[0]+1}")
+        # self.logger.debug(f"  Node Text: {self._get_node_text(node, code)}")
+        # self.logger.debug(f"  Node Children ({node.child_count}):")
+        # for i, child in enumerate(node.children):
+        #     child_text = self._get_node_text(child, code)
+        #     self.logger.debug(f"    Child {i}: Type={child.type} Text='{child_text[:30]}{'...' if len(child_text)>30 else ''}'")
+        # --- END DEBUG LOGGING ---
         field_info = {
             'name': None,
             'type': 'field',
@@ -837,25 +859,38 @@ class JavaScriptParserAdapter(BaseParserAdapter):
             'end_column': node.end_point[1]
         }
         
-        # Check if field is static
+        name_node = None
+        value_node = None
+        
+        # Check children for modifiers, name, and value
         for child in node.children:
             if child.type == 'static':
                 field_info['is_static'] = True
-                break
-        
-        # Get field name (could be identifier or private_property_identifier)
-        name_node = node.child_by_field_name('name')
+            elif child.type == 'identifier': # Public field name
+                name_node = child
+            elif child.type == 'private_property_identifier': # Private field name
+                name_node = child
+                field_info['is_private'] = True
+            elif child.type == '=': # Assignment operator, next child is value
+                # Note: This assumes value directly follows '=', might need adjustment
+                if child.next_sibling:
+                     value_node = child.next_sibling
+            # We might capture the value node even if it wasn't preceded by '='
+            # This handles cases like `field;` vs `field = value;`
+            # Let's assume the last relevant node could be the value if name is found
+            elif name_node and child.is_named: # Consider last named child after name as value
+                 value_node = child 
+
+        # Get field name from the found node
         if name_node:
             name = self._get_node_text(name_node, code)
             field_info['name'] = name
-            # Check if name node indicates private
-            if name_node.type == 'private_property_identifier': # <<< Check type for private
-                field_info['is_private'] = True
         else:
-            self.logger.warning(f"Field definition at line {field_info['line']} is missing a name node.")
+            # Log warning only if the node type was actually field_definition
+            if node.type == 'field_definition':
+                 self.logger.warning(f"Field definition at line {field_info['line']} did not contain an identifier or private_property_identifier node.")
         
-        # Get field value if present
-        value_node = node.child_by_field_name('value')
+        # Get field value if found
         if value_node:
             field_info['value'] = self._get_node_text(value_node, code)
         
@@ -902,33 +937,58 @@ class JavaScriptParserAdapter(BaseParserAdapter):
                         if value_node:
                             var_info['value_type'] = value_node.type
                             # Log type for all variables (Removed specific debug logging)
-                            # self.logger.debug(f"Variable '{name}' at line {var_info['line']} assigned value of type: {value_node.type}")
                             
+                            # --- REMOVE SIBLING CHECK BLOCK ---
                             # --- Refined Tagged Template Check --- 
-                            is_tagged = False
-                            if child.prev_named_sibling and child.prev_named_sibling.type == 'identifier':
-                                # If `tag` immediately precedes `template_string` value, it's tagged
-                                is_tagged = True
-                                var_info['is_tagged_template'] = True 
-                                self.logger.debug(f"Tagged template (sibling check) found for '{name}' at line {var_info['line']}")
+                            # is_tagged = False
+                            # if child.prev_named_sibling and child.prev_named_sibling.type == 'identifier':
+                            #     is_tagged = True
+                            #     var_info['is_tagged_template'] = True 
+                            #     self.logger.debug(f"Tagged template (sibling check) found for '{name}' at line {var_info['line']}")
                             # --- End Refined Check ---
 
-                            if value_node.type == 'call_expression':
-                                var_info['is_call_expression'] = True
-                            elif value_node.type == 'new_expression':
-                                var_info['is_new_expression'] = True
-                            elif value_node.type == 'template_string':
-                                var_info['is_template_literal'] = True
-                                # Known Limitation: Parsing tagged templates accurately is complex.
-                                # The direct 'tagged_template_expression' type is preferred but 
-                                # might not always be generated by tree-sitter depending on context.
-                            elif value_node.type == 'tagged_template_expression':
+                            # --- RESTRUCTURED CHECKS ---
+                            if value_node.type == 'tagged_template_expression':
                                 # This is the ideal case, mark both flags.
                                 var_info['is_template_literal'] = True
                                 var_info['is_tagged_template'] = True
                                 self.logger.debug(f"Tagged template (direct) found for '{name}' at line {var_info['line']}")
+                            elif value_node.type == 'template_string':
+                                var_info['is_template_literal'] = True
+                                # If it wasn't caught as 'tagged_template_expression', it's just a regular template literal.
+                            elif value_node.type == 'call_expression':
+                                var_info['is_call_expression'] = True
+                                # --- ADD DEBUGGING FOR CHILDREN ---
+                                self.logger.debug(f"  Call Expr Node: {value_node.type} {value_node.start_point}-{value_node.end_point}")
+                                func_node = value_node.child_by_field_name('function')
+                                func_text = self._get_node_text(func_node, code) if func_node else 'N/A'
+                                self.logger.debug(f"    Function Node (by field): {func_node.type if func_node else 'N/A'} Text: {func_text}")
+                                
+                                self.logger.debug(f"    Direct Children ({value_node.child_count}):")
+                                template_string_child = None
+                                for i, child in enumerate(value_node.children):
+                                    child_text = self._get_node_text(child, code)
+                                    self.logger.debug(f"      Child {i}: Type={child.type} Text='{child_text[:30]}{'...' if len(child_text)>30 else ''}'")
+                                    if child.type == 'template_string':
+                                        template_string_child = child
+                                        
+                                if template_string_child:
+                                    var_info['is_tagged_template'] = True
+                                    var_info['is_template_literal'] = True # It involves a template string
+                                    self.logger.debug(f"Tagged template (call expr / direct child check) found for '{name}' at line {var_info['line']}")
+                                else:
+                                    # Fallback/Original logic (might be redundant now but keep for safety?)
+                                    args_node = value_node.child_by_field_name('arguments')
+                                    if args_node and args_node.child_count > 0 and args_node.children[0].type == 'template_string':
+                                        var_info['is_tagged_template'] = True
+                                        var_info['is_template_literal'] = True
+                                        self.logger.debug(f"Tagged template (call expr/arg check - fallback) found for '{name}' at line {var_info['line']}")
+                                # --- END DEBUGGING FOR CHILDREN ---
+                            elif value_node.type == 'new_expression':
+                                var_info['is_new_expression'] = True
                             elif value_node.type == 'arrow_function':
                                 var_info['is_arrow_function'] = True
+                            # --- END RESTRUCTURED CHECKS ---
 
                         variables.append(var_info)
         
@@ -1403,20 +1463,6 @@ class SwiftParserAdapter(BaseParserAdapter):
             except Exception as e:
                  self.logger.exception(f"Error using MockParser for Swift: {e}")
         return None
-        
-        # --- If real tree-sitter parser was initialized (currently skipped) ---
-        # try:
-        #     code_bytes = source_code.encode('utf8') if isinstance(source_code, str) else source_code
-        #     tree = self.parser.parse(code_bytes)
-        #     mock_tree = MockTree() # Convert real tree to mock tree structure
-        #     if tree.root_node:
-        #         mock_tree.root_node = self._tree_sitter_to_mock_node(tree.root_node) # Need this conversion method
-        #         self._handle_tree_errors(tree.root_node, mock_tree)
-        #     return mock_tree
-        # except Exception as e:
-        #     self.logger.exception(f"Error parsing Swift code: {e}")
-        #     return None
-        return None # Should not be reached if parser is initialized
         
     def _extract_features(self, node: Node, mock_tree: MockTree) -> None:
         """Extract features from the Swift parse tree (Placeholder)."""

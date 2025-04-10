@@ -28,6 +28,10 @@ dependencies = [
 llm = [
     "torch>=2.2.0",
     "transformers>=4.38.0",
+    "accelerate>=0.27.0",
+    "bitsandbytes>=0.42.0",
+    "sentencepiece>=0.1.99",
+    "protobuf",
     "anthropic>=0.18.0",
     "openai>=1.12.0",
 ]

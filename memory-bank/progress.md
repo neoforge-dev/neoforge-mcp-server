@@ -1,24 +1,13 @@
 # Progress Tracker
 
-## Current Status
-- All servers migrated to BaseServer
-- Basic health tests passing
+*Current priorities, status, next steps, and known issues are tracked in `active-context.md`.*
 
-## Priorities
-1. Fix Failing Tests:
-   - test_list_sessions (CommandExecutor)
-   - test_async_await_support (JS Parser)
-   - test_export_variants (JS Parser)
+## Major Completed Milestones
+- BaseServer Implementation: All servers migrated.
+- Initial Error Handling: Standardized via `MCPError` and `ErrorHandlerMiddleware`.
+- Security Foundation: `ApiKey` dataclass and basic `SecurityManager` structure implemented.
 
-2. Test Coverage
-   - Current: ~11%
-   - Target: >90%
-
-3. Next Steps
-   - Implement endpoints
-   - Add integration tests
-   - Implement security
-
-## Risks
-- Low test coverage (~11%)
-- JS parser limitations
+## Key Blockers / Areas for Improvement
+- Low Test Coverage: Significant effort required to reach >90% target.
+- Known Test Failures: See `active-context.md` for specifics.
+- JS Parser Limitations: Potential future risk (monitor impact).

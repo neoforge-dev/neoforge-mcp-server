@@ -24,7 +24,6 @@ from server.utils.logging import LogManager
 from server.utils.monitoring import MonitoringManager
 from server.utils.security import SecurityManager, ApiKey
 from server.llm.manager import ModelManager
-from server.llm.models import ModelConfig
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone
 from slowapi import Limiter
@@ -120,33 +119,32 @@ def core_client(mock_dependencies):
 
 
 @pytest.fixture(scope="session")
-def llm_client(mock_dependencies):
+def _unused_llm_client(mock_dependencies):
     """Create a test client for the LLM MCP Server."""
-    # Patch ModelManager specifically for LLM server *before* app creation
-    with patch('server.llm.server.ModelManager') as MockModelManager:
-        # Configure the mock ModelManager instance
-        mock_model_manager_instance = MagicMock()
-        mock_model_manager_instance.list_models.return_value = [{"id": "mock-model", "name": "mock-model", "config": {"provider":"mock"}, "type":"mock"}] # Provide more complete mock data
-        # Mock other methods called by the LLM server routes
-        mock_model_manager_instance.get_model.return_value = MagicMock( # Mock the returned model object
-            tokenizer=MagicMock(encode=lambda x: [1,2,3]),
-            generate=lambda prompt, **kwargs: f"Generated: {prompt}"
-        )
-        MockModelManager.return_value = mock_model_manager_instance
+    # REMOVED: Patch ModelManager specifically for LLM server *before* app creation
+    # with patch('server.llm.server.ModelManager') as MockModelManager:
+    # Configure a generic mock if needed, but don't patch globally here
+    mock_model_manager_instance = MagicMock()
+    mock_model_manager_instance.list_models.return_value = [{"id": "generic-mock-model", "name": "generic-mock-model"}]
+    mock_model_manager_instance.get_model.return_value = MagicMock( 
+        tokenizer=MagicMock(encode=lambda x: [0]),
+        generate=lambda prompt, **kwargs: f"Generic Generated: {prompt}"
+    )
+    # MockModelManager.return_value = mock_model_manager_instance # Don't assign to a patch
 
-        # Create app *while* mocks (including ModelManager) are active
-        llm_app = create_llm_app()
+    # Create app 
+    llm_app = create_llm_app()
 
-        # Attach mocks/config to app state for tests to access if needed
-        llm_app.state.config = mock_dependencies["config"]
-        llm_app.state.monitor = mock_dependencies["monitor"]
-        llm_app.state.security = mock_dependencies["security"]
-        llm_app.state.logger = mock_dependencies["logger"]
-        llm_app.state.limiter = mock_dependencies.get("Limiter") # Safely get if exists
-        llm_app.state.model_manager = mock_model_manager_instance # Add specific mock manager
+    # Attach mocks/config to app state for tests to access if needed
+    llm_app.state.config = mock_dependencies["config"]
+    llm_app.state.monitor = mock_dependencies["monitor"]
+    llm_app.state.security = mock_dependencies["security"]
+    llm_app.state.logger = mock_dependencies["logger"]
+    llm_app.state.limiter = mock_dependencies.get("Limiter") # Safely get if exists
+    # llm_app.state.model_manager = mock_model_manager_instance # Avoid attaching this generic one
 
-        with TestClient(llm_app) as client:
-            yield client
+    with TestClient(llm_app) as client:
+        yield client
 
 
 @pytest.fixture(scope="session")
@@ -268,11 +266,11 @@ def neodo_client(neodo_test_config):
 
 
 @pytest.fixture(scope="session")
-def all_clients(core_client, llm_client, neod_client, neoo_client, neolocal_client, neollm_client, neodo_client):
+def all_clients(core_client, _unused_llm_client, neod_client, neoo_client, neolocal_client, neollm_client, neodo_client):
     """Return a dictionary of all test clients."""
     return {
         "core": core_client,
-        "llm": llm_client,
+        "llm": _unused_llm_client,
         "neod": neod_client,
         "neoo": neoo_client,
         "neolocal": neolocal_client,
@@ -391,7 +389,7 @@ def mock_server_config_llm(mock_llm_config):
 
 
 @pytest.fixture
-def mock_model_manager(monkeypatch, mock_llm_config):
+def _unused_mock_model_manager(monkeypatch, mock_llm_config):
     """Fixture to mock the ModelManager."""
     mock_instance = MagicMock(spec=ModelManager)
     mock_instance.list_models.return_value = [mock_llm_config]
@@ -524,3 +522,9 @@ def mock_dependencies(base_test_config):
             "monitor": None,
             "security": mock_security_instance
         } 
+
+@pytest.fixture(scope="session")
+def mock_server_config():
+    """Provides a base mock ServerConfig for testing."""
+    # Ensure rate limiting is off by default for tests unless specifically enabled
+    return ServerConfig(rate_limit_enabled=False) 
