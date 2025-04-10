@@ -9,6 +9,7 @@ hypothesis>=6.82.6
 click>=8.1.0
 requests>=2.31.0
 rich>=13.7.0
+loguru>=0.7.0
 
 # OpenTelemetry dependencies
 opentelemetry-api>=1.21.0

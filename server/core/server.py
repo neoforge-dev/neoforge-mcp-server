@@ -3,7 +3,7 @@ Core MCP Server - Provides core functionality and command execution.
 """
 
 from typing import Any, Dict, Optional
-from fastapi import Depends, HTTPException, Security, Request, FastAPI
+from fastapi import Depends, HTTPException, Security, Request, FastAPI, Body
 from fastapi.security import APIKeyHeader
 from fastapi.responses import StreamingResponse
 import json
@@ -12,6 +12,7 @@ import asyncio
 import uuid
 import os
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from ..utils.base_server import BaseServer
 from ..utils.error_handling import handle_exceptions, MCPError
@@ -19,6 +20,12 @@ from ..utils.security import ApiKey
 
 # API key header
 api_key_header = APIKeyHeader(name="X-API-Key")
+
+# Pydantic model for /execute request body
+class ExecuteRequest(BaseModel):
+    command: str
+    timeout: Optional[int] = None
+    allow_background: bool = False
 
 class CoreMCPServer(BaseServer):
     """Core MCP Server implementation."""
@@ -112,17 +119,13 @@ class CoreMCPServer(BaseServer):
         @self.app.post("/api/v1/execute")
         @handle_exceptions()
         async def execute_command(
-            command: str,
-            timeout: Optional[int] = None,
-            allow_background: bool = False,
+            request_body: ExecuteRequest,
             api_key: ApiKey = Depends(self.get_api_key)
         ) -> Dict[str, Any]:
             """Execute a command.
             
             Args:
-                command: Command to execute
-                timeout: Command timeout in seconds
-                allow_background: Whether to allow background execution
+                request_body: Request body containing command details
                 api_key: Validated API key
                 
             Returns:
@@ -135,19 +138,19 @@ class CoreMCPServer(BaseServer):
                     detail="Insufficient permissions"
                 )
                 
-            # Execute command
+            # Execute command using values from the request body
             with self.monitor.span_in_context(
                 "execute_command",
                 attributes={
-                    "command": command,
-                    "timeout": timeout,
-                    "background": allow_background
+                    "command": request_body.command,
+                    "timeout": request_body.timeout,
+                    "background": request_body.allow_background
                 }
             ):
                 return self.executor.execute(
-                    command,
-                    timeout=timeout,
-                    allow_background=allow_background
+                    request_body.command,
+                    timeout=request_body.timeout,
+                    allow_background=request_body.allow_background
                 )
                 
         @self.app.post("/api/v1/terminate/{pid}")

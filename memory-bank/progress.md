@@ -11,5 +11,5 @@
 - JS Parser Tests: Fixed by correctly checking the 're-export' type instead of using incorrect property.
 
 ## Key Blockers / Areas for Improvement
-- Low Test Coverage: Significant effort required to reach >90% target (current ~14.7%).
+- Low Test Coverage: Significant effort required to reach >90% target. Detailed analysis revealed widespread 0% coverage across many server and utility modules. **Current focus is implementing tests, starting with `CoreServer`.**
 - JS Parser Limitations: Potential future risk (monitor impact).

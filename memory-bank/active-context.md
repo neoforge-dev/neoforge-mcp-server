@@ -4,15 +4,16 @@
 - Phase 2: BaseServer Migration & >90% Test Coverage.
 
 ## Current Task
-- ~~Fix remaining failing tests in `tests/llm/test_llm_server.py`.~~
-  - ~~`test_generate_endpoint_default_model` (ValidationError)~~
-  - ~~`test_generate_model_not_found` (MCPError instead of NotFoundError)~~
-- Fixed all tests in `tests/llm/test_llm_server.py`. Coverage of LLM server improved to 92%.
-- ~~Investigate/fix `test_list_sessions_empty` in `tests/test_system_utilities.py`.~~
-- Fixed `test_list_sessions_empty` by using the CommandExecutor's list_processes method properly.
-- ~~Investigate/fix JS Parser tests (`test_async_await_support`, `test_export_variants`).~~
-- Fixed JS Parser test `test_export_variants` in `tests/test_javascript_parser.py` by correctly checking for 're-export' type instead of 'is_re_export' property.
-- *Previously addressed in this session:* `test_list_models_unauthorized`, `test_list_models_endpoint`, `test_tokenize_unauthorized`, `test_tokenize_model_not_found`.
+- Systematically increase test coverage across all servers (Target: >90%).
+- **Currently working on:** Implementing tests for `CoreServer` (`server/core/server.py`) located in `tests/core/test_core_server.py`.
+  - Added basic fixtures (TestClient, mocked SecurityManager/CommandExecutor).
+  - Added tests for `/health`.
+  - Added tests for `/api/v1/execute`.
+  - Added tests for `/api/v1/terminate/{pid}`.
+  - Added tests for `/api/v1/output/{pid}`.
+  - Added tests for `/api/v1/processes`.
+  - Added tests for `/api/v1/block` and `/api/v1/unblock`.
+  - **Next for CoreServer:** Add tests for `/sse`.
 
 ## Other Known Failures (To Address Next)
 - None currently identified.
@@ -33,19 +34,31 @@
     - LLM generate endpoint now properly handles parameters, avoiding ValidationError when parameters are None.
 
 ## Next Steps (Priority Order)
-1. ~~Fix `test_generate_endpoint_default_model` (LLM Server).~~
-2. ~~Fix `test_generate_model_not_found` (LLM Server).~~
-3. ~~Re-run all LLM tests (`tests/llm/test_llm_server.py`).~~
-4. ~~Investigate/fix `test_list_sessions`.~~
-5. ~~Investigate/fix JS Parser tests (`test_async_await_support`, `test_export_variants`).~~
-6. Systematically increase test coverage across all servers (Target: >90%).
+1.  **Complete `CoreServer` Tests:** Finish writing tests for `CoreServer` (`/sse` endpoint).
+2.  **Run CoreServer Coverage:** Execute `pytest --cov=server/core tests/core/` to assess coverage.
+3.  **Address Utility Modules (`server/utils`):** Write unit tests for core utilities:
+    - `error_handling.py`
+    - `config.py`
+    - `logging.py`
+    - `security.py`
+    - `command_executor.py` (if not sufficiently covered by CoreServer tests)
+    - `file_operations.py`, `monitoring.py`, `validation.py`
+4.  **Address `LLMServer` (`server/llm`):** Write/improve tests for:
+    - `manager.py` (unit tests, mock external calls)
+    - `models.py` (unit tests, mock external calls/local loading)
+    - `server.py` (integration tests for API endpoints)
+5.  **Address `Code Understanding` (`server/code_understanding`):** Prioritize key modules:
+    - `parser.py`, `analyzer.py`, `extractor.py`, `language_adapters.py`
+6.  **Address Remaining Neo* Servers:** Write integration tests for specific functionalities:
+    - `NeoDO`, `NeoDev`, `NeoOps`, `NeoLocal`
 
 ## Test Status / Coverage
 - LLM Server (`tests/llm/test_llm_server.py`): 14/14 passing (100%).
 - LLM Server implementation coverage: 92%.
 - `test_list_sessions_empty`: Fixed and passing.
 - JS Parser tests: All now passing.
-- Overall Coverage: ~14.7% (Target: >90%).
+- **CoreServer Tests (`tests/core/test_core_server.py`):** In progress. Basic structure and tests for execute, terminate, output, processes, block/unblock endpoints implemented. `/sse` tests pending.
+- Overall Coverage: ~14.7% (Target: >90%). *Note: Detailed analysis indicated widespread 0% coverage in many modules, requiring systematic effort.*
 
 ## Active Decisions
 - Standardized error handling via `MCPError` and `ErrorHandlerMiddleware`.
@@ -54,14 +67,16 @@
 - Parameters for model operations are now passed only when they have non-None values.
 - Renamed methods in server/core/__init__.py need to be reflected in tests (e.g., list_sessions → list_processes).
 - JS Parser tests looking for specific export types must check for the correct property names used by the implementation.
+- **Testing Strategy:** Adopted a prioritized approach focusing on Utilities -> Core -> LLM -> Neo* servers.
+- **CoreServer Test Fixtures:** Standardized fixtures for `TestClient`, mocked `SecurityManager`, `CommandExecutor`, and `ApiKey`. Using `patch.object` within fixtures to inject mocks.
 
 # --- Active Context ---
-# Status: All servers migrated. All previously failing tests are now fixed.
-# Next: Focus on systematically increasing test coverage across all servers.
-# Blockers: Low overall test coverage (~14.7%) remains a priority.
-# Decisions: Used Pydantic models for NeoDO request validation. Centralized DO mocking in fixture.
+# Status: All servers migrated. All previously failing tests fixed. Test implementation for `CoreServer` is in progress.
+# Next: Complete `CoreServer` tests (SSE endpoint), then move to testing `server/utils`.
+# Blockers: Low overall test coverage (~14.7%) remains the primary focus. Widespread 0% coverage identified in core utilities and servers.
+# Decisions: Prioritized testing plan established. Standard fixtures for CoreServer tests created.
 
 # --- Progress ---
 # BaseServer: Done & Tests Passing.
-# Server Migration: 4/7 Done (Core, LLM, NeoDev, NeoOps).
-# Testing: BaseServer, LLMServer tests passing. Initial NeoDevServer, NeoOpsServer tests passing. Previously identified failing tests fixed. Overall coverage improving (~14.7%). 
+# Server Migration: All servers migrated.
+# Testing: LLMServer (92% cov), BaseServer tests passing. System utils/JS parser tests fixed. **CoreServer tests in progress.** Overall coverage low (~14.7%). 

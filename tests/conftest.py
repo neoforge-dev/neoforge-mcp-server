@@ -24,10 +24,12 @@ from server.utils.logging import LogManager
 from server.utils.monitoring import MonitoringManager
 from server.utils.security import SecurityManager, ApiKey
 from server.llm.manager import ModelManager
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime, timezone
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from server.utils.error_handling import ErrorHandlerMiddleware
+from loguru import logger as Logger
 
 # Add the parent directory to path to import the server module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -147,19 +149,40 @@ def _unused_llm_client(mock_dependencies):
         yield client
 
 
-@pytest.fixture(scope="session")
-def neod_client(mock_dependencies):
-    """Create a test client for the Neo Development Server."""
-    neod_app = create_neod_app()
-    # Attach mocks/config to app state if tests need them
-    neod_app.state.config = mock_dependencies["config"]
-    neod_app.state.monitor = mock_dependencies["monitor"]
-    neod_app.state.security = mock_dependencies["security"]
-    neod_app.state.logger = mock_dependencies["logger"]
-    neod_app.state.limiter = mock_dependencies["Limiter"]
+@pytest.fixture(scope="function")
+def neod_client():
+    """Create a TestClient for the Neo Dev Server with rate limiting patched out."""
+    from server.neod import create_app  # Local import within fixture
 
-    with TestClient(neod_app) as client:
-        yield client
+    # Define mocks for dependencies
+    # Explicitly disable rate limiting in mock config, though patching is the primary mechanism
+    mock_config = ServerConfig(enable_rate_limiting=False)
+    mock_logger = MagicMock(spec=Logger)
+    mock_logger.bind.return_value = mock_logger # Ensure bind returns the mock logger
+    mock_log_manager = MagicMock()
+    mock_log_manager.get_logger.return_value = mock_logger
+    mock_security_manager = MagicMock()
+    mock_security_manager.verify_api_key = AsyncMock(return_value=True) # Mock API key verification
+    mock_analyzer = MagicMock()
+    mock_analyzer.analyze_directory = AsyncMock(return_value={"analysis": "mock directory analysis"})
+    mock_analyzer.analyze_file = AsyncMock(return_value={"analysis": "mock file analysis"})
+
+    # Patch necessary dependencies and the core rate limiter check
+    with patch("server.utils.config.load_config", return_value=mock_config), \
+         patch("server.utils.logging.LogManager", return_value=mock_log_manager), \
+         patch("server.utils.security.SecurityManager", return_value=mock_security_manager), \
+         patch("server.neod.server.CodeAnalyzer", return_value=mock_analyzer), \
+         patch("slowapi.extension.Limiter._check_request_limit", lambda *args, **kwargs: None): # Correct patch target
+
+        # Create the app *inside* the patch context to ensure mocks are used
+        app = create_app()
+
+        # Optionally attach mocks to app state if tests need to access them directly
+        # Example: app.state.analyzer = mock_analyzer
+
+        # Create and yield the TestClient
+        with TestClient(app) as client:
+            yield client
 
 
 @pytest.fixture(scope="session")
@@ -174,27 +197,6 @@ def neoo_client(mock_dependencies):
     neoo_app.state.limiter = mock_dependencies["Limiter"]
 
     with TestClient(neoo_app) as client:
-        yield client
-
-
-@pytest.fixture(scope="session")
-def neolocal_client(mock_dependencies) -> TestClient:
-    """Create a test client for the NeoLocal server with mocked dependencies."""
-    # Patch dependencies similar to other server fixtures
-    # Dependencies are already mocked by mock_dependencies fixture
-
-    # Create app *with* mocks active
-    app = create_neolocal_app()
-
-    # Attach config and mocks to app state (needed by tests)
-    app.state.config = mock_dependencies["config"]
-    app.state.monitor = mock_dependencies["monitor"] # Attach mock monitor
-    app.state.security = mock_dependencies["security"]
-    app.state.logger = mock_dependencies["logger"]
-    app.state.limiter = mock_dependencies["Limiter"]
-
-    # Yield the client
-    with TestClient(app) as client:
         yield client
 
 
@@ -223,57 +225,44 @@ def valid_api_key(neodo_test_config):
     return list(neodo_test_config.api_keys.keys())[0]
 
 
-@pytest.fixture(scope="session")
-def neodo_client(neodo_test_config):
-    """Create a test client for the Neo DO Server with DO Manager mocked."""
-    # Patch DO Manager AND the loggers using nested with statements
-    with patch('server.neodo.server.digitalocean.Manager') as mock_manager:
-        with patch('server.utils.base_server.LogManager') as MockLogManager:
-            with patch('server.utils.error_handling.logger') as MockErrorHandlingLogger:
+@pytest.fixture(scope="function")
+def neodo_client(neodo_test_config, mock_dependencies):
+    """Create a TestClient for NeoDO with rate limiting patched out."""
+    from server.neodo import create_app # Local import
 
-                # Configure mock DO Manager instance
-                mock_manager_instance = MagicMock()
-                mock_droplet = MagicMock()
-                mock_droplet.id = 123
-                mock_droplet.power_on.return_value = None
-                mock_droplet.power_off.return_value = None
-                mock_droplet.reboot.return_value = None
-                mock_droplet.shutdown.return_value = None
-                mock_snapshot = MagicMock()
-                mock_snapshot.id = 456
-                mock_droplet.take_snapshot.return_value = mock_snapshot
-                mock_manager_instance.get_droplet.return_value = mock_droplet
-                mock_manager.return_value = mock_manager_instance
+    # Access mocks by key from the dictionary
+    mock_log_manager = mock_dependencies["LogManager"]
+    mock_do_manager = mock_dependencies["DOManager"] # Assuming DOMAnager is added to mock_dependencies
+    mock_security_manager = mock_dependencies["SecurityManager"]
+    mock_error_handler_logger = mock_dependencies["ErrorHandlingLogger"]
 
-                # Configure mock loggers
-                mock_logger_instance = MagicMock(spec=logging.Logger)
-                mock_logger_instance.bind = MagicMock(return_value=mock_logger_instance)
-                MockLogManager.return_value.get_logger.return_value = mock_logger_instance
-                MockErrorHandlingLogger.bind = MagicMock(return_value=MockErrorHandlingLogger)
+    # Patch limiter check and error handler logger initialization
+    with patch("server.utils.config.load_config", return_value=neodo_test_config), \
+         patch("server.utils.logging.LogManager", return_value=mock_log_manager), \
+         patch("digitalocean.Manager", return_value=mock_do_manager), \
+         patch("server.utils.security.SecurityManager", return_value=mock_security_manager), \
+         patch("server.utils.error_handling.logger", mock_error_handler_logger), \
+         patch("slowapi.extension.Limiter._check_request_limit", lambda *args, **kwargs: None): # Patch Limiter check
 
-                # Create the app *after* the patches are active
-                app = create_neodo_app(config=neodo_test_config, env="test")
+        # Create the app *inside* the patch context
+        app = create_app()
 
-                # Attach mocks to app state for test access
-                app.state.mock_do_manager = mock_manager_instance
-                app.state.mock_droplet = mock_droplet
-                app.state.mock_snapshot = mock_snapshot
-                app.state.mock_logger = mock_logger_instance
+        # Attach the DO manager mock to the app state
+        app.state.do_manager = mock_do_manager
 
-                # Yield the TestClient
-                with TestClient(app) as client:
-                    yield client
+        # Create and yield TestClient
+        with TestClient(app) as client:
+            yield client
 
 
 @pytest.fixture(scope="session")
-def all_clients(core_client, _unused_llm_client, neod_client, neoo_client, neolocal_client, neollm_client, neodo_client):
+def all_clients(core_client, _unused_llm_client, neod_client, neoo_client, neollm_client, neodo_client):
     """Return a dictionary of all test clients."""
     return {
         "core": core_client,
         "llm": _unused_llm_client,
         "neod": neod_client,
         "neoo": neoo_client,
-        "neolocal": neolocal_client,
         "neollm": neollm_client,
         "neodo": neodo_client
     }
@@ -471,7 +460,7 @@ def mock_neolocal_config():
     )
 
 # Fixture for a base config (used by multiple server tests)
-@pytest.fixture
+@pytest.fixture(scope="session")
 def base_test_config():
     return ServerConfig(
         name="test_server",
@@ -480,36 +469,46 @@ def base_test_config():
         api_keys={"test-key": {"permissions": ["read", "write"], "description": "Test Key"}},
         enable_metrics=False,
         enable_tracing=False,
-        enable_rate_limiting=False, # Disable by default for most tests
+        enable_rate_limiting=False, # Disable rate limiting explicitly for tests
         default_rate_limit="1000/second" # Use a high limit even if enabled
     )
 
 # Common mock patches used by multiple server fixtures
-@pytest.fixture
+@pytest.fixture(scope="session")
 def mock_dependencies(base_test_config):
     with patch('server.utils.config.ConfigManager.load_config') as MockLoadConfig, \
          patch('server.utils.base_server.LogManager') as MockLogManager, \
          patch('server.utils.base_server.MonitoringManager') as MockMonitoringManager, \
          patch('server.utils.base_server.SecurityManager') as MockSecurity, \
-         patch('server.utils.error_handling.logger') as MockErrorHandlingLogger: # Removed limiter patch here
+         patch('server.utils.error_handling.logger') as MockErrorHandlingLogger:
 
         MockLoadConfig.return_value = base_test_config
 
         mock_logger_instance = MagicMock(spec=logging.Logger)
+        # Add bind method expected by ErrorHandlerMiddleware
         mock_logger_instance.bind = MagicMock(return_value=mock_logger_instance)
         MockLogManager.return_value.get_logger.return_value = mock_logger_instance
-        MockErrorHandlingLogger.bind = MagicMock(return_value=MockErrorHandlingLogger)
+        # Add bind method to the error handling logger mock as well, just in case
+        MockErrorHandlingLogger.bind = MagicMock(return_value=MockErrorHandlingLogger) 
 
         MockMonitoringManager.return_value = None
 
-        mock_security_instance = MagicMock()
+        mock_security_instance = MockSecurity.return_value
+        # Use correct ApiKey fields for instantiation
         mock_api_key_obj = ApiKey(
-            key_id="test-id", key_hash="test-hash", name="test-key",
-            created_at=time.time(), scopes=set(["read", "write"])
+            key_id="test-key-id-123", # Use key_id
+            key_hash="dummyhash1234567890abcdef", # Use key_hash
+            name="Test Key",
+            created_at=time.time(),
+            scopes={"read", "write"} # Use scopes
         )
         mock_security_instance.validate_api_key.return_value = mock_api_key_obj
-        mock_security_instance.check_permission.return_value = True
-        MockSecurity.return_value = mock_security_instance
+        mock_security_instance.check_permission.return_value = True # Assume permission granted for tests
+
+        # Create a mock limiter that allows all requests
+        mock_limiter = MagicMock(spec=Limiter)
+        mock_limiter.limit = MagicMock(return_value=lambda x: x)  # No-op decorator
+        mock_limiter._check_request_limit = MagicMock()  # No-op method
 
         yield {
             "LoadConfig": MockLoadConfig,
@@ -520,11 +519,38 @@ def mock_dependencies(base_test_config):
             "config": base_test_config,
             "logger": mock_logger_instance,
             "monitor": None,
-            "security": mock_security_instance
-        } 
+            "security": mock_security_instance,
+            "Limiter": mock_limiter
+        }
 
 @pytest.fixture(scope="session")
 def mock_server_config():
     """Provides a base mock ServerConfig for testing."""
     # Ensure rate limiting is off by default for tests unless specifically enabled
     return ServerConfig(rate_limit_enabled=False) 
+
+@pytest.fixture(scope="function")
+def neolocal_client(neolocal_test_config, mock_dependencies):
+    """Create a TestClient for NeoLocal with rate limiting patched out."""
+    from server.neolocal import create_app # Local import
+
+    # Unpack mocks from the shared fixture
+    _, mock_log_manager, _, mock_security_manager, _ = mock_dependencies
+
+    # Create a specific mock logger for ErrorHandlerMiddleware patch
+    mock_error_handler_logger = MagicMock(spec=Logger)
+    mock_error_handler_logger.bind.return_value = mock_error_handler_logger
+
+    # Patch limiter check and error handler logger initialization
+    with patch("server.utils.config.load_config", return_value=neolocal_test_config), \
+         patch("server.utils.logging.LogManager", return_value=mock_log_manager), \
+         patch("server.utils.security.SecurityManager", return_value=mock_security_manager), \
+         patch("server.utils.error_handling.logger", mock_error_handler_logger), \
+         patch("slowapi.extension.Limiter._check_request_limit", lambda *args, **kwargs: None): # Patch Limiter check
+
+        # Create the app *inside* the patch context
+        app = create_app()
+
+        # Create and yield TestClient
+        with TestClient(app) as client:
+            yield client 

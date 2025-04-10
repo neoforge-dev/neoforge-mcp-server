@@ -38,12 +38,12 @@ def test_manage_resources_endpoint(neodo_client: TestClient, valid_api_key: str)
     headers = {"X-API-Key": valid_api_key}
 
     # Access mocks from app state configured in the fixture
-    mock_manager = neodo_client.app.state.mock_do_manager
-    mock_droplet = neodo_client.app.state.mock_droplet
+    mock_manager = neodo_client.app.state.do_manager
+    mock_droplet = mock_manager.get_droplet.return_value
 
     # Reset mocks before calls (good practice)
     mock_manager.reset_mock()
-    mock_droplet.reset_mock()
+    mock_manager.get_droplet.return_value.reset_mock()
 
     # Test power on
     response = neodo_client.post("/api/v1/do/management", json={
@@ -59,7 +59,7 @@ def test_manage_resources_endpoint(neodo_client: TestClient, valid_api_key: str)
 
     # Reset mocks for next action
     mock_manager.reset_mock()
-    mock_droplet.reset_mock()
+    mock_manager.get_droplet.return_value.reset_mock()
 
     # Test power off
     response = neodo_client.post("/api/v1/do/management", json={
@@ -75,7 +75,7 @@ def test_manage_resources_endpoint(neodo_client: TestClient, valid_api_key: str)
 
     # Reset mocks for next action
     mock_manager.reset_mock()
-    mock_droplet.reset_mock()
+    mock_manager.get_droplet.return_value.reset_mock()
 
     # Test reboot
     response = neodo_client.post("/api/v1/do/management", json={
@@ -94,14 +94,15 @@ def test_backup_resources_endpoint(neodo_client: TestClient, valid_api_key: str)
     headers = {"X-API-Key": valid_api_key}
 
     # Access mocks from app state
-    mock_manager = neodo_client.app.state.mock_do_manager
-    mock_droplet = neodo_client.app.state.mock_droplet
-    mock_snapshot = neodo_client.app.state.mock_snapshot
+    mock_manager = neodo_client.app.state.do_manager
+    mock_droplet = mock_manager.get_droplet.return_value
+    mock_snapshot = mock_droplet.take_snapshot.return_value
+    mock_snapshot.id = 456
 
     # Reset mocks
     mock_manager.reset_mock()
-    mock_droplet.reset_mock()
-    mock_snapshot.reset_mock()
+    mock_manager.get_droplet.return_value.reset_mock()
+    mock_manager.get_droplet.return_value.take_snapshot.return_value.reset_mock()
 
     response = neodo_client.post("/api/v1/do/backup", json={
         "resource_type": "droplet",
