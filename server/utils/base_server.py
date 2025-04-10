@@ -271,16 +271,17 @@ class BaseServer:
                 }
             }
             
-        @self.app.get("/api/v1/models", tags=["Base"])
-        @handle_exceptions()
-        @limiter.limit("100/minute")
-        async def list_models(
-            request: Request,
-            api_key: ApiKey = Depends(self.get_api_key)
-        ) -> List[Dict[str, Any]]:
-            """List available models (placeholder for demonstration)."""
-            self.security.check_permission(api_key, "read")
-            return [{"name": "model1", "type": "llm"}, {"name": "model2", "type": "embedding"}]
+        # Remove the conflicting placeholder /api/v1/models route
+        # @self.app.get("/api/v1/models", tags=["Base"])
+        # @handle_exceptions()
+        # @limiter.limit("100/minute")
+        # async def list_models(
+        #     request: Request,
+        #     api_key: ApiKey = Depends(self.get_api_key)
+        # ) -> List[Dict[str, Any]]:
+        #     """List available models (placeholder for demonstration)."""
+        #     self.security.check_permission(api_key, "read")
+        #     return [{"name": "model1", "type": "llm"}, {"name": "model2", "type": "embedding"}]
             
     async def get_api_key(self, api_key: str = Security(api_key_header)) -> ApiKey:
         """Validate API key and return key info.
