@@ -11,6 +11,9 @@ from unittest.mock import patch, MagicMock
 # Import the server module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import server
+# Import from server.core
+from server.utils.command_execution import CommandExecutor
+from server.core import session_lock, active_sessions
 
 
 def test_system_info():
@@ -121,19 +124,23 @@ def test_kill_process():
     assert not process_still_running
 
 
-@pytest.mark.skipif(not hasattr(server, 'list_sessions'), reason="list_sessions function not available")
+@pytest.mark.skipif(not hasattr(server.core, 'list_sessions'), reason="list_sessions function not available")
 def test_list_sessions_empty():
     """Test listing active command sessions when none are running."""
-    # Clear any existing sessions
-    with server.session_lock:
-        server.active_sessions.clear()
+    # Create a new CommandExecutor instance for testing
+    executor = CommandExecutor()
     
-    # Get session list
-    sessions_result = server.list_sessions()
+    # Clear any existing processes in the executor
+    with executor._process_lock:
+        executor._active_processes.clear()
+    
+    # Get process list
+    processes_result = executor.list_processes()
     
     # Verify result
-    assert "sessions" in sessions_result
-    assert len(sessions_result["sessions"]) == 0
+    assert "processes" in processes_result
+    assert len(processes_result["processes"]) == 0
+    assert processes_result["status"] == "success"
 
 
 def test_process_output_streaming():

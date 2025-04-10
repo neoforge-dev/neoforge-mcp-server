@@ -422,8 +422,8 @@ def test_export_variants(analyzer):
     namespace_exports = [e for e in exports if e.get('is_namespace')]
     assert len(namespace_exports) == 1, "Should find namespace export"
     
-    # Check re-exports
-    re_exports = [e for e in exports if e.get('is_re_export')]
+    # Check re-exports - this needs to check for type 're-export', not is_re_export property
+    re_exports = [e for e in exports if e.get('type') == 're-export']
     assert len(re_exports) == 1, "Should find re-export"
 
 def test_import_variants(analyzer):

@@ -164,7 +164,7 @@ class LLMServer(BaseServer):
         ) -> GenerateResponse:
             """Generate text using specified model."""
             logger = request.state.log_manager
-            logger.info(f"Received generate request for model: {generate_request.model_name}")
+            logger.info(f"Received generate request for model: {generate_request.model_name or 'default'}")
 
             if not self.security.check_permission(api_key, "llm:generate"):
                 raise AuthorizationError(
@@ -177,24 +177,33 @@ class LLMServer(BaseServer):
                 try:
                     model = self.model_manager.get_model(generate_request.model_name)
                 except ValueError as e:
-                     # Reraise ValueError as NotFoundError for proper HTTP response
+                    # Reraise ValueError as NotFoundError for proper HTTP response
                     raise NotFoundError(
                         message=f"Model not found: {generate_request.model_name or 'default'}",
                         details={"model_name": generate_request.model_name or 'default', "original_error": str(e)}
                     )
+                except ConfigurationError as e:
+                    # Re-raise ConfigurationError with the original message
+                    raise
 
                 if not model: # Should technically be unreachable now
-                     raise NotFoundError( # Keep as fallback just in case get_model returns None
-                         message=f"Model not found: {generate_request.model_name or 'default'}",
-                         details={"model_name": generate_request.model_name or 'default'}
-                     )
+                    raise NotFoundError( # Keep as fallback just in case get_model returns None
+                        message=f"Model not found: {generate_request.model_name or 'default'}",
+                        details={"model_name": generate_request.model_name or 'default'}
+                    )
 
                 actual_model_name = model.name # Get the actual model name used
 
+                # Pass only valid parameters to generate
+                generation_params = {}
+                if generate_request.max_tokens is not None:
+                    generation_params["max_tokens"] = generate_request.max_tokens
+                if generate_request.temperature is not None:
+                    generation_params["temperature"] = generate_request.temperature
+
                 generated_text = model.generate(
                     generate_request.prompt,
-                    max_tokens=generate_request.max_tokens,
-                    temperature=generate_request.temperature
+                    **generation_params
                 )
 
                 tokens = model.tokenizer.encode(generated_text)
@@ -205,8 +214,8 @@ class LLMServer(BaseServer):
                 )
 
             except Exception as e:
-                 logger.error(f"Error during text generation: {str(e)}")
-                 raise
+                logger.error(f"Error during text generation: {str(e)}")
+                raise
 
 def create_app() -> FastAPI:
     """Factory function to create the LLMServer FastAPI app."""
