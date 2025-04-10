@@ -281,25 +281,50 @@ class MockParser:
 
         def process_node(node: MockNode) -> None:
             nonlocal current_scope
-            if node.type == 'import_statement':
-                for child in node.children:
-                    symbols['imports'].append({
-                        'type': 'import',
-                        'module': child.text,
-                        'start_line': node.start_point[0],
-                        'end_line': node.end_point[0]
-                    })
-            elif node.type == 'import_from_statement':
-                module = next((child.text for child in node.children if child.type == 'dotted_name'), '')
-                for child in node.children:
-                    if child.type == 'identifier':
-                        symbols['imports'].append({
-                            'type': 'import',
-                            'module': module,
-                            'symbol': child.text,
-                            'start_line': node.start_point[0],
-                            'end_line': node.end_point[0]
-                        })
+            # --- Handle Imports (ast.Import) --- 
+            if node.type == 'import':
+                 # The MockNode text for ast.Import is like "import module1, module2"
+                 # We need to extract the module names
+                 logger.info(f"extract_symbols: Processing node type 'import': {node.text}")
+                 match = re.match(r'import\s+(.*)', node.text)
+                 if match:
+                     modules = [m.strip() for m in match.group(1).split(',')]
+                     for module_name in modules:
+                         logger.info(f"extract_symbols: Appending simple import: {module_name}")
+                         symbols['imports'].append({
+                             'type': 'import',
+                             'module': module_name,
+                             'symbol': None, # No specific symbol for 'import module'
+                             'start_line': node.start_point[0],
+                             'end_line': node.end_point[0]
+                         })
+                 else:
+                     logger.warning(f"extract_symbols: Regex failed for simple import: {node.text}")
+            # --- Handle From Imports (ast.ImportFrom) --- 
+            elif node.type == 'module': # This type comes from converting ast.ImportFrom
+                 # The children of this 'module' node are individual 'import' nodes like "from x import y"
+                 logger.info(f"extract_symbols: Processing node type 'module': {node.text if node.text else '[Root Module]'}")
+                 for import_child in node.children:
+                     # Add check if it's actually an import node expected here
+                     if import_child.type == 'import': # Check the child type
+                         logger.info(f"extract_symbols: Processing 'module' child of type 'import': {import_child.text}")
+                         match = re.match(r'from\s+([.\w]+)\s+import\s+(\w+)', import_child.text)
+                         if match:
+                             module_name, symbol_name = match.groups()
+                             logger.info(f"extract_symbols: Appending from_import: {module_name} -> {symbol_name}")
+                             symbols['imports'].append({
+                                 'type': 'from_import',
+                                 'module': module_name,
+                                 'symbol': symbol_name,
+                                 'start_line': import_child.start_point[0],
+                                 'end_line': import_child.end_point[0]
+                             })
+                         else:
+                             logger.warning(f"extract_symbols: Regex failed for from_import in child: {import_child.text}")
+                     # else: # Optional: Log if a child of 'module' is not 'import'
+                     #    logger.debug(f"extract_symbols: Skipping child of type {import_child.type} within 'module' node processing.")
+
+            # -- Existing Function/Class/Call/Attribute handling ---
             elif node.type == 'function_definition':
                 name = next((child.text for child in node.children if child.type == 'name'), '')
                 params = []
@@ -312,13 +337,17 @@ class MockParser:
                                     'start_line': param.start_point[0],
                                     'end_line': param.end_point[0]
                                 })
-                symbols['functions'].append({
-                    'type': 'function',
-                    'name': name,
-                    'parameters': params,
-                    'start_line': node.start_point[0] + 1,
-                    'end_line': node.end_point[0]
-                })
+                # Only append if at the top level (no current class scope)
+                if current_scope is None: 
+                    logger.info(f"extract_symbols: Appending top-level function: {name}")
+                    symbols['functions'].append({
+                        'type': 'function',
+                        'name': name,
+                        'parameters': params,
+                        'start_line': node.start_point[0] + 1,
+                        'end_line': node.end_point[0]
+                    })
+                # --- Scope handling for recursion --- 
                 old_scope = current_scope
                 current_scope = name
                 for child in node.children:
@@ -327,20 +356,29 @@ class MockParser:
                             process_node(child_node)
                 current_scope = old_scope
             elif node.type == 'class_definition':
-                name = node.text
+                # Extract name, bases, and methods directly
+                class_name_node = next((child for child in node.children if child.type == 'identifier'), None)
+                name = class_name_node.text if class_name_node else node.text # Fallback if structure differs
                 methods = []
                 bases = []
+                body_children = [] # Collect body nodes for explicit method extraction
                 for child in node.children:
                     if child.type == 'bases':
                         bases.extend([base.text for base in child.children if base.type == 'identifier'])
                     elif child.type == 'body':
-                        for method in child.children:
-                            if method.type == 'function_definition':
+                        # Find function definitions within the body
+                        body_children = child.children
+                        for method_node in child.children: 
+                            if method_node.type == 'function_definition':
+                                # Extract method name (assuming similar structure to top-level functions)
+                                method_name_node = next((m_child for m_child in method_node.children if m_child.type == 'name'), None)
+                                method_name = method_name_node.text if method_name_node else method_node.text # Fallback
                                 methods.append({
-                                    'name': method.text,
-                                    'start_line': method.start_point[0] + 1,
-                                    'end_line': method.end_point[0]
+                                    'name': method_name,
+                                    'start_line': method_node.start_point[0] + 1,
+                                    'end_line': method_node.end_point[0]
                                 })
+                logger.info(f"extract_symbols: Appending class: {name} with {len(methods)} methods")
                 symbols['classes'].append({
                     'type': 'class',
                     'name': name,
@@ -349,12 +387,15 @@ class MockParser:
                     'start_line': node.start_point[0] + 1,
                     'end_line': node.end_point[0]
                 })
+                # --- Scope handling for recursion --- 
                 old_scope = current_scope
                 current_scope = name
-                for child in node.children:
-                    if child.type == 'body':
-                        for child_node in child.children:
-                            process_node(child_node)
+                # --- REMOVED recursive call for body nodes --- 
+                # No need to recursively call process_node on body children here, 
+                # as methods are explicitly extracted above. 
+                # This prevents methods from being added to the top-level functions list.
+                # for child_node in body_children: # Use collected body children
+                #    process_node(child_node)
                 current_scope = old_scope
             elif node.type == 'call':
                 references.append({
@@ -373,10 +414,18 @@ class MockParser:
                     'end_line': node.end_point[0]
                 })
 
-            for child in node.children:
-                process_node(child)
+            # Recursive call - Log before recursion
+            logger.debug(f"extract_symbols: Recursing into children of node type {node.type}")
+            # *** Ensure recursion doesn't happen if inside class_definition block already handled ***
+            if node.type != 'class_definition': # Only recurse if not inside the class block handled above
+                for child in node.children:
+                    process_node(child)
+            # else: # Optional log if skipping recursion for class children
+            #    logger.debug(f"extract_symbols: Skipping explicit recursion for children of handled class_definition {node.text}")
 
+        logger.info("extract_symbols: Starting extraction by calling process_node on root.")
         process_node(tree.root_node)
+        logger.info(f"extract_symbols: Finished extraction. Found {len(symbols['imports'])} imports.")
 
         return symbols, references
 

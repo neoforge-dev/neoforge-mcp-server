@@ -145,7 +145,7 @@ def test_end_to_end_analysis(mocker, sample_code):
     
     # Run the analysis pipeline
     tree = mock_tree  # Use our mock tree directly
-    analysis_result = analyzer.analyze_tree(tree)
+    analysis_result = analyzer.analyze_code(sample_code)  # Use analyze_code instead of analyze_tree
     result = extractor.extract_symbols(tree)  # Pass tree instead of analysis_result
     
     # Verify the results

@@ -11,7 +11,7 @@ from .parser import CodeParser
 # Import common types
 from .common_types import MockNode, MockTree
 # Import language adapters
-from .language_adapters import JavaScriptParserAdapter
+from .language_adapters import JavaScriptParserAdapter, PythonMockParserAdapter
 from .graph import Node
 
 logger = logging.getLogger(__name__)
@@ -99,15 +99,15 @@ class CodeAnalyzer:
             adapter = None
             if language == 'javascript':
                 adapter = JavaScriptParserAdapter()
+            elif language == 'python':
+                adapter = PythonMockParserAdapter()
             # Add elif for SwiftParserAdapter etc. here
             # elif language == 'swift':
             #     adapter = SwiftParserAdapter()
             else:
-                # Default or fallback (Could be Python or raise error)
-                # For now, let's assume we need an adapter or error out
-                # If supporting Python via ast, that logic needs to be an adapter too
+                # No adapter found for the detected/specified language
                  logger.warning(f"No specific adapter found for language: {language}. Analysis might be incomplete.")
-                 # Return empty structure or raise?
+                 # Return empty structure
                  return {
                      'language': language,
                      'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': [],
@@ -120,34 +120,17 @@ class CodeAnalyzer:
                  # Add language info to the result from adapter
                  analysis_result['language'] = language
                  return analysis_result
-            else:
-                # This path shouldn't be hit if logic above is complete
-                 logger.error(f"Adapter was None for language {language}, should have been handled.")
-                 return {
-                     'language': language,
-                     'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': [],
-                     'has_errors': True, 'errors': [{'message': 'Internal error: Adapter not found'}]
-                 }
+            # else:
+            #    # This path should not be reachable if the logic above correctly handles
+            #    # all supported languages and the final else block catches unsupported ones.
+            #     logger.error(f"Adapter was None for language {language}, logic error in analyze_code.")
+            #     return {
+            #         'language': language,
+            #         'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': [],
+            #         'has_errors': True, 'errors': [{'message': 'Internal error: Adapter became None unexpectedly'}]
+            #     }
                  
-            # --- REMOVE OLD LOGIC --- 
-            # if language == 'javascript':
-            #     js_adapter = JavaScriptParserAdapter()
-            #     js_adapter.analyze(code) # DISCARDED RESULT
-            # else: # Default Python logic
-            #     tree = self.parser.parse(code)
-            #     self.reset_state()
-            #     self._process_node(tree.root_node)
-            # 
-            # return { # BUILT FROM INTERNAL STATE
-            #     'language': self.language,
-            #     'imports': self.imports,
-            #     'functions': self.functions,
-            #     'classes': self.classes,
-            #     'variables': self.variables,
-            #     'exports': self.exports,
-            #     'error_details': self.error_details
-            # }
-            # --- END REMOVED OLD LOGIC ---
+            # --- OLD LOGIC REMOVED --- 
 
         except Exception as e:
             logger.exception(f"Error analyzing code for language {language}: {e}")

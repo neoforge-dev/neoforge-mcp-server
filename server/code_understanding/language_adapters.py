@@ -25,6 +25,9 @@ from .common_types import MockTree, MockNode
 # Import build paths
 from .build_languages import JAVASCRIPT_LANGUAGE_PATH
 
+# Import MockParser specifically here if not globally available
+from .mock_parser import MockParser
+
 logger = logging.getLogger(__name__)
 
 class ParserError(Exception):
@@ -1450,7 +1453,6 @@ class SwiftParserAdapter(BaseParserAdapter):
             # Use MockParser if tree-sitter setup failed or is unavailable
             self.logger.warning("Using MockParser for Swift due to lack of real parser.")
             try:
-                from .mock_parser import MockParser # Local import if needed
                 mock_parser = MockParser(language='swift')
                 mock_tree = mock_parser.parse(source_code)
                 # Handle potential errors from mock parser
@@ -1546,3 +1548,104 @@ class SwiftParserAdapter(BaseParserAdapter):
          # members = ...
          # return {'name': name, ...}
          return None # Corrected indentation
+
+# --- Python Mock Adapter --- 
+
+class PythonMockParserAdapter(BaseParserAdapter):
+    """Parser adapter for Python using the MockParser."""
+    
+    def __init__(self):
+        """Initialize the Python mock parser adapter."""
+        super().__init__()
+        # MockParser doesn't need a language object
+        self.parser = MockParser() # Instantiate MockParser
+        self.logger.info("Initialized PythonMockParserAdapter.")
+
+    def parse(self, code: Union[str, bytes]) -> Optional[MockTree]:
+        """Parse Python code using MockParser.
+        
+        Args:
+            code: Python code as string or bytes
+            
+        Returns:
+            MockTree: A mock tree structure.
+            
+        Raises:
+            ValueError: If MockParser fails.
+        """
+        if not code:
+            self.logger.warning("Empty code provided to PythonMockParserAdapter.parse")
+            # Return an empty mock tree structure
+            return MockTree(root_node=MockNode(type='module', children=[]), errors=[], has_errors=False)
+
+        try:
+            # MockParser might expect bytes or str, ensure consistency
+            if isinstance(code, bytes):
+                 code_str = code.decode('utf-8')
+            else:
+                 code_str = code
+                 
+            # Call the MockParser's parse method
+            mock_tree = self.parser.parse(code_str)
+            
+            if not mock_tree:
+                 self.logger.error("MockParser returned None.")
+                 raise ValueError("Mock parsing failed, returned None.")
+            
+            # MockParser directly returns a MockTree, ensure it has expected attributes
+            if not hasattr(mock_tree, 'root_node'):
+                self.logger.error("MockTree from MockParser missing root_node.")
+                # Create a default empty tree
+                mock_tree.root_node = MockNode(type='module', children=[])
+                mock_tree.has_errors = True # Mark as error
+                if not hasattr(mock_tree, 'errors'): mock_tree.errors = []
+                mock_tree.errors.append({'message': 'Internal error: MockTree missing root_node'})
+                
+            if not hasattr(mock_tree, 'errors'):
+                 mock_tree.errors = [] # Ensure errors list exists
+            if not hasattr(mock_tree, 'has_errors'):
+                 mock_tree.has_errors = len(mock_tree.errors) > 0 # Set based on errors
+
+            return mock_tree
+        except Exception as e:
+            self.logger.exception(f"Python MockParser failed: {e}")
+            raise ValueError(f"Python mock parsing failed: {e}") from e
+
+    def analyze(self, code: Union[str, bytes]) -> Dict[str, List[Dict]]:
+        """Parse Python code with MockParser and extract features.
+        
+        Returns:
+            Dictionary with features compatible with CodeAnalyzer expectations.
+        """
+        try:
+            mock_tree = self.parse(code)
+            if not mock_tree:
+                raise ValueError("Parsing returned no tree.")
+            
+            # Use MockParser's own extraction method
+            features, errors = self.parser.extract_symbols(mock_tree)
+            
+            # Ensure the output format matches CodeAnalyzer expectations
+            analysis_result = {
+                'language': 'python', # Set language
+                'imports': features.get('imports', []), 
+                'functions': features.get('functions', []), 
+                'classes': features.get('classes', []), 
+                'variables': features.get('variables', []), 
+                'exports': [], # Python doesn't have direct JS-style exports
+                'has_errors': len(errors) > 0, 
+                'errors': errors 
+            }
+            return analysis_result
+
+        except ValueError as e:
+             self.logger.error(f"Python mock analysis could not proceed: {e}")
+             return {
+                 'language': 'python',
+                 'imports': [], 'functions': [], 'classes': [], 'variables': [], 'exports': [],
+                 'has_errors': True,
+                 'errors': [{'message': f"Analysis Failed: {e}"}], 
+             }
+        except Exception as e:
+            self.logger.exception(f"Python mock analysis failed unexpectedly: {e}")
+            raise # Re-raise critical errors

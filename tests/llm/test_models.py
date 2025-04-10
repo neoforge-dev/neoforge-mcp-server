@@ -4,6 +4,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 import os
 import logging
+from server.utils.error_handling import ConfigurationError
+import sys
 
 # Import models and configs to test
 from server.llm.models import (
@@ -48,6 +50,11 @@ def test_placeholder_model_generate():
 def openai_config():
     """Provides a basic OpenAIModelConfig."""
     return OpenAIModelConfig(model_id="gpt-test", api_key_env_var="TEST_OPENAI_KEY")
+
+@pytest.fixture
+def local_config():
+    """Provides a basic LocalModelConfig."""
+    return LocalModelConfig(model_id="test-local-model", model_path="/fake/path", device="cpu")
 
 @patch.dict(os.environ, {"TEST_OPENAI_KEY": "fake-api-key"})
 @patch('server.llm.models.openai') # Patch the imported openai module
@@ -103,8 +110,7 @@ def test_openai_model_init_package_not_installed(openai_config):
 # TODO: Add tests for LocalModel generate (mocking pipeline calls) 
 
 # Test missing packages
-@patch('server.llm.models.transformers', None)
-@patch('server.llm.models.torch', None)
+@patch.dict('sys.modules', {'transformers': None, 'torch': None})
 def test_local_model_init_missing_packages(local_config):
     """Test LocalModel init fails if transformers or torch package is not installed."""
     with pytest.raises(ImportError) as excinfo:
@@ -127,21 +133,24 @@ def mock_transformers_objects():
     return mock_tokenizer, mock_model, mock_pipeline
 
 @pytest.mark.usefixtures("caplog") # Apply caplog fixture
-@patch('server.llm.models.torch')
-@patch('server.llm.models.transformers')
+@patch.dict('sys.modules', {'torch': MagicMock(), 'transformers': MagicMock()})
 def test_local_model_init_actual_load_success_cpu(
-    mock_transformers, mock_torch, local_config, mock_transformers_objects, caplog
+    local_config, mock_transformers_objects, caplog
 ):
     """Test successful LocalModel init with mocked actual loading on CPU."""
+    import sys
+    transformers = sys.modules['transformers']
+    torch = sys.modules['torch']
+    
     caplog.set_level(logging.INFO)
     mock_tokenizer, mock_model, mock_pipeline = mock_transformers_objects
     
     # Configure mocks for CPU
-    mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
-    mock_transformers.AutoModelForCausalLM.from_pretrained.return_value = mock_model
-    mock_transformers.pipeline.return_value = mock_pipeline
-    mock_torch.cuda.is_available.return_value = False
-    mock_torch.backends.mps.is_available.return_value = False
+    transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
+    transformers.AutoModelForCausalLM.from_pretrained.return_value = mock_model
+    transformers.pipeline.return_value = mock_pipeline
+    torch.cuda.is_available.return_value = False
+    torch.backends.mps.is_available.return_value = False
 
     # Action
     # Use a config specifying cpu explicitly or defaulting to it
@@ -150,10 +159,10 @@ def test_local_model_init_actual_load_success_cpu(
 
     # Assertions
     assert model.pipeline is mock_pipeline
-    mock_transformers.AutoTokenizer.from_pretrained.assert_called_once_with(cpu_config.model_path)
-    mock_transformers.AutoModelForCausalLM.from_pretrained.assert_called_once_with(cpu_config.model_path)
+    transformers.AutoTokenizer.from_pretrained.assert_called_once_with(cpu_config.model_path)
+    transformers.AutoModelForCausalLM.from_pretrained.assert_called_once_with(cpu_config.model_path)
     mock_model.to.assert_called_once_with("cpu")
-    mock_transformers.pipeline.assert_called_once_with(
+    transformers.pipeline.assert_called_once_with(
         "text-generation",
         model=mock_model,
         tokenizer=mock_tokenizer,
@@ -163,28 +172,31 @@ def test_local_model_init_actual_load_success_cpu(
     assert "Moved model test-cpu to device 'cpu'" in caplog.text
 
 @pytest.mark.usefixtures("caplog")
-@patch('server.llm.models.torch')
-@patch('server.llm.models.transformers')
+@patch.dict('sys.modules', {'torch': MagicMock(), 'transformers': MagicMock()})
 def test_local_model_init_actual_load_success_cuda(
-    mock_transformers, mock_torch, mock_transformers_objects, caplog
+    mock_transformers_objects, caplog
 ):
     """Test successful LocalModel init with mocked actual loading on CUDA."""
+    import sys
+    transformers = sys.modules['transformers']
+    torch = sys.modules['torch']
+    
     caplog.set_level(logging.INFO)
     mock_tokenizer, mock_model, mock_pipeline = mock_transformers_objects
     cuda_config = LocalModelConfig(model_id="test-cuda", model_path="/fake/cuda/path", device="cuda")
     
     # Configure mocks for CUDA
-    mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
-    mock_transformers.AutoModelForCausalLM.from_pretrained.return_value = mock_model
-    mock_transformers.pipeline.return_value = mock_pipeline
-    mock_torch.cuda.is_available.return_value = True # CUDA available
-    mock_torch.backends.mps.is_available.return_value = False
+    transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
+    transformers.AutoModelForCausalLM.from_pretrained.return_value = mock_model
+    transformers.pipeline.return_value = mock_pipeline
+    torch.cuda.is_available.return_value = True # CUDA available
+    torch.backends.mps.is_available.return_value = False
 
     model = LocalModel(config=cuda_config)
 
     assert model.pipeline is mock_pipeline
     mock_model.to.assert_called_once_with("cuda")
-    mock_transformers.pipeline.assert_called_once_with(
+    transformers.pipeline.assert_called_once_with(
         "text-generation",
         model=mock_model,
         tokenizer=mock_tokenizer,
@@ -194,18 +206,21 @@ def test_local_model_init_actual_load_success_cuda(
     assert f"Moved model {model.name} to device 'cuda'" in caplog.text
 
 @pytest.mark.usefixtures("caplog")
-@patch('server.llm.models.torch')
-@patch('server.llm.models.transformers')
+@patch.dict('sys.modules', {'torch': MagicMock(), 'transformers': MagicMock()})
 def test_local_model_init_load_tokenizer_error(
-     mock_transformers, mock_torch, local_config, caplog
+    local_config, caplog
 ):
     """Test error handling when tokenizer loading fails."""
+    import sys
+    transformers = sys.modules['transformers']
+    torch = sys.modules['torch']
+    
     caplog.set_level(logging.ERROR)
     # Simulate error during tokenizer loading
     load_error = OSError("Could not load tokenizer")
-    mock_transformers.AutoTokenizer.from_pretrained.side_effect = load_error
-    mock_torch.cuda.is_available.return_value = False
-    mock_torch.backends.mps.is_available.return_value = False
+    transformers.AutoTokenizer.from_pretrained.side_effect = load_error
+    torch.cuda.is_available.return_value = False
+    torch.backends.mps.is_available.return_value = False
 
     with pytest.raises(ConfigurationError) as excinfo:
         LocalModel(config=local_config)
@@ -215,20 +230,23 @@ def test_local_model_init_load_tokenizer_error(
     assert "Failed to load local model 'test-local-model'" in caplog.text
 
 @pytest.mark.usefixtures("caplog")
-@patch('server.llm.models.torch')
-@patch('server.llm.models.transformers')
+@patch.dict('sys.modules', {'torch': MagicMock(), 'transformers': MagicMock()})
 def test_local_model_init_load_model_error(
-    mock_transformers, mock_torch, local_config, mock_transformers_objects, caplog
+    local_config, mock_transformers_objects, caplog
 ):
     """Test error handling when model loading fails."""
+    import sys
+    transformers = sys.modules['transformers']
+    torch = sys.modules['torch']
+    
     caplog.set_level(logging.ERROR)
     mock_tokenizer, _, _ = mock_transformers_objects
-    mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
+    transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
     # Simulate error during model loading
     load_error = ValueError("Invalid model architecture")
-    mock_transformers.AutoModelForCausalLM.from_pretrained.side_effect = load_error
-    mock_torch.cuda.is_available.return_value = False
-    mock_torch.backends.mps.is_available.return_value = False
+    transformers.AutoModelForCausalLM.from_pretrained.side_effect = load_error
+    torch.cuda.is_available.return_value = False
+    torch.backends.mps.is_available.return_value = False
 
     with pytest.raises(ConfigurationError) as excinfo:
         LocalModel(config=local_config)
@@ -238,21 +256,24 @@ def test_local_model_init_load_model_error(
     assert "Failed to load local model 'test-local-model'" in caplog.text
 
 @pytest.mark.usefixtures("caplog")
-@patch('server.llm.models.torch')
-@patch('server.llm.models.transformers')
+@patch.dict('sys.modules', {'torch': MagicMock(), 'transformers': MagicMock()})
 def test_local_model_init_pipeline_error(
-    mock_transformers, mock_torch, local_config, mock_transformers_objects, caplog
+    local_config, mock_transformers_objects, caplog
 ):
     """Test error handling when pipeline creation fails."""
+    import sys
+    transformers = sys.modules['transformers']
+    torch = sys.modules['torch']
+    
     caplog.set_level(logging.ERROR)
     mock_tokenizer, mock_model, _ = mock_transformers_objects
-    mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
-    mock_transformers.AutoModelForCausalLM.from_pretrained.return_value = mock_model
+    transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
+    transformers.AutoModelForCausalLM.from_pretrained.return_value = mock_model
     # Simulate error during pipeline creation
     load_error = RuntimeError("Pipeline creation failed")
-    mock_transformers.pipeline.side_effect = load_error
-    mock_torch.cuda.is_available.return_value = False
-    mock_torch.backends.mps.is_available.return_value = False
+    transformers.pipeline.side_effect = load_error
+    torch.cuda.is_available.return_value = False
+    torch.backends.mps.is_available.return_value = False
 
     with pytest.raises(ConfigurationError) as excinfo:
         LocalModel(config=local_config)
@@ -272,18 +293,19 @@ def test_local_model_init_pipeline_error(
 @pytest.fixture
 def initialized_local_model(local_config, mock_transformers_objects):
     """Provides an initialized LocalModel with a mocked pipeline."""
-    mock_tokenizer, mock_model, mock_pipeline = mock_transformers_objects
-    
-    # Need to patch torch and transformers during init
-    with patch('server.llm.models.torch') as mock_torch, \
-         patch('server.llm.models.transformers') as mock_transformers:
+    with patch.dict('sys.modules', {'torch': MagicMock(), 'transformers': MagicMock()}):
+        import sys
+        transformers = sys.modules['transformers']
+        torch = sys.modules['torch']
+        
+        mock_tokenizer, mock_model, mock_pipeline = mock_transformers_objects
         
         # Configure mocks for successful loading
-        mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
-        mock_transformers.AutoModelForCausalLM.from_pretrained.return_value = mock_model
-        mock_transformers.pipeline.return_value = mock_pipeline
-        mock_torch.cuda.is_available.return_value = False
-        mock_torch.backends.mps.is_available.return_value = False
+        transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
+        transformers.AutoModelForCausalLM.from_pretrained.return_value = mock_model
+        transformers.pipeline.return_value = mock_pipeline
+        torch.cuda.is_available.return_value = False
+        torch.backends.mps.is_available.return_value = False
         mock_model.to.return_value = mock_model # Ensure .to() returns the mock model
 
         model = LocalModel(config=local_config)
