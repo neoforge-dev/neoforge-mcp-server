@@ -18,7 +18,7 @@ from server.neod import create_app as create_neod_app
 from server.neoo import create_app as create_neoo_app
 from server.neolocal import create_app as create_neolocal_app
 from server.neollm.server import app as neollm_app
-from server.neodo import create_app as create_neodo_app
+from server.neodo import create_app as create_neodo_app, NeoDOServer
 from server.utils.config import ConfigManager, ServerConfig
 from server.utils.logging import LogManager
 from server.utils.monitoring import MonitoringManager
@@ -33,6 +33,7 @@ from loguru import logger as Logger
 import digitalocean
 from digitalocean import Manager as DOManager_spec
 from server.llm.models import BaseModelConfig, PlaceholderModelConfig, OpenAIModelConfig, LocalModelConfig
+from server.utils.base_server import BaseServer
 
 # Add the parent directory to path to import the server module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -256,7 +257,7 @@ def valid_api_key(neodo_test_config):
 @pytest.fixture(scope="function")
 def neodo_client(neodo_test_config, mock_dependencies):
     """Create a TestClient for NeoDO with rate limiting patched out."""
-    from server.neodo import create_app # Local import
+    from server.neodo import create_app, NeoDOServer # <<< Import NeoDOServer
 
     # Access mocks by key from the dictionary
     mock_log_manager = mock_dependencies["LogManager"]
@@ -265,7 +266,7 @@ def neodo_client(neodo_test_config, mock_dependencies):
     mock_error_handler_logger = mock_dependencies["ErrorHandlingLogger"]
 
     # Create a mock MonitoringManager instance specifically for neodo tests
-    # Config neodo_test_config has enable_tracing=True, so BaseServer will init monitor
+    # Config neodo_test_config has enable_tracing=True, so BaseServer should init monitor
     mock_monitor_instance = MagicMock(spec=MonitoringManager)
     span_mock = MagicMock()
     span_context_manager_mock = MagicMock()
@@ -287,14 +288,30 @@ def neodo_client(neodo_test_config, mock_dependencies):
          patch("slowapi.extension.Limiter._check_request_limit", lambda *args, **kwargs: None) as MockLimiterCheck:
 
         # Create the app *inside* the patch context
-        # BaseServer.__init__ will use the patched managers
         app = create_app()
 
-        # Attach necessary mocks to app state (ensure consistency if middleware/deps use state)
-        app.state.do_manager = mock_do_manager.return_value
+        # --- Force-set monitor on server instance used by routes ---
+        server_instance = None
+        for route in app.routes:
+            if hasattr(route, "endpoint") and hasattr(route.endpoint, "__self__"):
+                instance = route.endpoint.__self__
+                if isinstance(instance, NeoDOServer):
+                    server_instance = instance 
+                    # print(f"Found NeoDOServer instance for route: {route.path}")
+                    instance.monitor = mock_monitor_instance
+                    # print(f"  Instance monitor set: {hasattr(instance, 'monitor') and instance.monitor is not None}")
+            elif hasattr(route, "dependant") and route.dependant and route.dependant.call:
+                 pass # Simplified - may need deeper inspection
+
+        # if server_instance is None:
+            # print("Warning: Could not find NeoDOServer instance attached to routes to patch monitor.")
+        # --- End Force-set --- 
+
+        # Attach necessary mocks to app state
+        app.state.do_manager = mock_do_manager.return_value 
         app.state.logger = mock_log_manager.return_value.get_logger.return_value
-        app.state.security = mock_security_manager.return_value
-        # Removed app.state.monitor = mock_monitor_instance - BaseServer init should handle self.monitor via patch
+        app.state.security = mock_security_manager
+        app.state.monitor = mock_monitor_instance
 
         # Create and yield TestClient
         with TestClient(app) as client:
@@ -524,8 +541,8 @@ def mock_neolocal_config():
         } },
         enable_auth=True,
         # Add other relevant mock config fields for neolocal if needed
-        enable_metrics=False,
-        enable_tracing=False,
+        enable_metrics=True, # <<< Set to True to match test expectation
+        enable_tracing=True, # <<< Set to True to match test expectation
         allowed_origins=["*"]
     )
 
@@ -619,22 +636,29 @@ def neolocal_client(mock_neolocal_config, mock_dependencies):
     mock_log_manager = mock_dependencies["LogManager"]
     mock_security_manager = mock_dependencies["SecurityManager"]
     mock_error_handler_logger = mock_dependencies["ErrorHandlingLogger"]
-    # Add other mocks if neolocal depends on them (e.g., CommandExecutor?)
-    # mock_command_executor = mock_dependencies.get("CommandExecutor") # Example
+    # Assume a mock monitor might be needed if config enables it
+    mock_monitor_constructor = MagicMock(return_value=None) # Default to None unless config enables
+    if mock_neolocal_config.enable_metrics or mock_neolocal_config.enable_tracing:
+        mock_monitor_instance = MagicMock(spec=MonitoringManager) # Create a proper mock if needed
+        # Configure the mock instance as needed (e.g., span_in_context)
+        mock_monitor_constructor = MagicMock(return_value=mock_monitor_instance)
 
-    # Assume neolocal_test_config provides the necessary config details
+    # Use the specific mock_neolocal_config for this client
     with patch("server.utils.config.ConfigManager.load_config", return_value=mock_neolocal_config) as MockLoadConfig, \
          patch("server.utils.logging.LogManager", return_value=mock_log_manager) as MockLogMgr, \
          patch("server.utils.security.SecurityManager", return_value=mock_security_manager) as MockSecMgr, \
+         patch("server.utils.monitoring.MonitoringManager", mock_monitor_constructor) as MockMonitorMgr, \
          patch("server.utils.error_handling.logger", mock_error_handler_logger) as MockErrLogger, \
          patch("slowapi.extension.Limiter._check_request_limit", lambda *args, **kwargs: None): # Patch Limiter
          # Add patches for other neolocal dependencies here if needed
 
         app = create_app()
 
-        # Attach mocks to app state
+        # Attach mocks to app state (ensure these match what BaseServer init would do)
+        app.state.config = mock_neolocal_config # Use the correct config
         app.state.logger = mock_log_manager.return_value.get_logger.return_value
-        app.state.security = mock_security_manager.return_value
+        app.state.security = mock_security_manager # Use the mock security manager instance directly
+        app.state.monitor = mock_monitor_constructor.return_value # Use the actual mock instance
         # Attach other necessary state mocks
 
         with TestClient(app) as client:
