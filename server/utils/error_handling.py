@@ -2,7 +2,7 @@
 Shared error handling utilities for MCP servers.
 """
 
-from typing import Any, Dict, Optional, Type, Union
+from typing import Any, Dict, Optional, Type, Union, Callable, Coroutine
 from functools import wraps
 import traceback
 import logging
@@ -12,6 +12,8 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 import uuid
 from datetime import datetime
+import inspect
+from fastapi import HTTPException
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -130,38 +132,61 @@ def format_error_response(error: Union[Exception, str], error_code: str = "UNKNO
 
 def handle_exceptions(error_code: str = "INTERNAL_ERROR", log_traceback: bool = True):
     """Decorator for handling exceptions in route handlers or other functions."""
-    def decorator(func):
+    def decorator(func: Callable[..., Coroutine[Any, Any, Any]]) -> Callable[..., Coroutine[Any, Any, Any]]:
         @wraps(func)
-        async def wrapper(*args, **kwargs):
-            request_id = getattr(args[0].state, 'request_id', 'N/A') if args and hasattr(args[0], 'state') else 'N/A'
-            bound_logger = logger.bind(request_id=request_id, function_name=func.__name__)
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Assume request is the first argument if present and is a Request object
+            request: Request | None = None
+            if args and isinstance(args[0], Request):
+                request = args[0]
+
+            # Get logger from request state if available
+            logger_instance = getattr(request.state, 'log_manager', None) if request and hasattr(request, 'state') else None
+            if logger_instance is None or not hasattr(logger_instance, 'bind'):
+                print("Warning: Logger not found or invalid in request state for @handle_exceptions")
+                bound_logger = logging.getLogger("fallback_logger")
+            else:
+                request_id = getattr(request.state, 'request_id', 'N/A') if request and hasattr(request, 'state') else 'N/A'
+                try:
+                    bound_logger = logger_instance.bind(request_id=request_id, function_name=func.__name__)
+                except Exception as bind_error:
+                    print(f"Error binding logger context: {bind_error}")
+                    bound_logger = logger_instance
+
             try:
-                # Await the result if the original function is async
-                if asyncio.iscoroutinefunction(func):
-                    result = await func(*args, **kwargs)
-                else:
-                    result = func(*args, **kwargs)
+                # Directly call the function, letting FastAPI handle dependency injection
+                result = await func(*args, **kwargs)
                 return result
+            except HTTPException as e:
+                raise e
             except MCPError as e:
+                log_method = getattr(bound_logger, 'error', print)
                 if log_traceback:
-                    bound_logger.error(
+                    # Wrap custom fields in 'extra' dictionary
+                    extra_data = {
+                        "error_code": e.error_code,
+                        "status_code": e.status_code,
+                        "details": e.details,
+                    }
+                    log_method(
                         f"MCPError in {func.__name__}",
-                        error_code=e.error_code,
-                        status_code=e.status_code,
-                        details=e.details,
-                        exc_info=e
+                        extra=extra_data,
+                        exc_info=True
                     )
-                # Re-raise MCPError for the middleware to handle and format
                 raise e
             except Exception as e:
+                log_method = getattr(bound_logger, 'exception', print)
                 if log_traceback:
-                    bound_logger.exception(f"Unexpected error in {func.__name__}")
-                # Wrap unexpected errors in MCPError for consistent handling
+                    log_method(f"Unexpected error in {func.__name__}")
+
+                # Create a generic MCPError for unhandled exceptions
                 raise MCPError(
                     message=f"An unexpected error occurred: {str(e)}",
                     status_code=500,
-                    error_code=error_code # Use the provided error code
+                    error_code=error_code,
+                    details={"exception_type": type(e).__name__}
                 ) from e
+
         return wrapper
     return decorator
 
@@ -242,11 +267,15 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             
         except MCPError as e:
             # Handle known MCP errors
+            # Wrap custom fields in 'extra' dictionary for logging
+            extra_data = {
+                 "error_code": e.error_code,
+                 "status_code": e.status_code,
+                 "details": e.details,
+            }
             self.logger.error(
                 "MCP error occurred",
-                error_code=e.error_code,
-                status_code=e.status_code,
-                details=e.details
+                extra=extra_data # Pass as extra
             )
             
             return JSONResponse(

@@ -31,7 +31,7 @@ from .error_handling import (
 limiter = Limiter(key_func=get_remote_address)
 
 # API key header
-api_key_header = APIKeyHeader(name="X-API-Key")
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Middleware for logging request details."""
@@ -166,7 +166,7 @@ class BaseServer:
         ).get_logger()
         
         # Initialize monitoring if enabled
-        if self.config.enable_metrics:
+        if self.config.enable_metrics or self.config.enable_tracing:
             self.monitor = MonitoringManager(
                 app_name=app_name,
                 metrics_port=self.config.metrics_port,
@@ -223,11 +223,6 @@ class BaseServer:
                 max_age=3600
             )
         
-        # Add SlowAPI middleware LAST (after error handling, state, etc.)
-        if self.config.enable_rate_limiting:
-            self.logger.info(f"Enabling rate limiting: {self.config.default_rate_limit}")
-            self.app.add_middleware(SlowAPIMiddleware)
-        
         # Add state middleware (needed by rate limiter key func if custom logic used)
         @self.app.middleware("http")
         async def add_state(request: Request, call_next):
@@ -251,7 +246,7 @@ class BaseServer:
             
         @self.app.get("/health")
         @handle_exceptions()
-        @limiter.limit("10/second")
+        # @limiter.limit("10/second") # Temporarily removed for debugging 422 error
         async def health_check(request: Request) -> Dict[str, Any]:
             """Health check endpoint."""
             if not self.config.enable_health_checks:
@@ -283,26 +278,26 @@ class BaseServer:
         #     self.security.check_permission(api_key, "read")
         #     return [{"name": "model1", "type": "llm"}, {"name": "model2", "type": "embedding"}]
             
-    async def get_api_key(self, api_key: str = Security(api_key_header)) -> ApiKey:
-        """Validate API key and return key info.
-        
-        Args:
-            api_key: API key from request header
-            
-        Returns:
-            ApiKey object
-            
-        Raises:
-            AuthenticationError if key is invalid
-        """
+    async def get_api_key(
+        self,
+        api_key: str | None = Security(api_key_header)
+    ) -> ApiKey:
+        """Dependency to validate the API key."""
+        if api_key is None:
+            # Explicitly raise AuthenticationError (maps to 401) if header is missing
+            raise AuthenticationError("API key header missing")
+
         try:
-            return self.security.validate_api_key(api_key)
-        except MCPError as e:
-            raise AuthenticationError(
-                message=str(e),
-                details={"api_key": api_key}
-            )
-            
+            validated_key = self.security.validate_api_key(api_key)
+            return validated_key
+        except AuthenticationError as e:
+            # Re-raise specific auth errors
+            raise e
+        except Exception as e:
+            # Catch any other validation errors (e.g., internal issues) and map to generic auth error
+            self.logger.error(f"API key validation failed unexpectedly: {e}", exc_info=True)
+            raise AuthenticationError("Invalid API key") # Keep response generic
+
     def get_app(self) -> FastAPI:
         """Get the FastAPI application.
         

@@ -12,7 +12,7 @@ import asyncio
 import uuid
 import os
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..utils.base_server import BaseServer
 from ..utils.error_handling import handle_exceptions, MCPError
@@ -26,6 +26,14 @@ class ExecuteRequest(BaseModel):
     command: str
     timeout: Optional[int] = None
     allow_background: bool = False
+
+class TerminateRequest(BaseModel):
+    """Request model for terminating a process."""
+    force: bool = Field(False, description="Whether to forcefully terminate the process")
+
+class CommandManageRequest(BaseModel):
+    """Request model for blocking/unblocking a command pattern."""
+    command: str = Field(..., description="The command pattern to manage")
 
 class CoreMCPServer(BaseServer):
     """Core MCP Server implementation."""
@@ -156,15 +164,15 @@ class CoreMCPServer(BaseServer):
         @self.app.post("/api/v1/terminate/{pid}")
         @handle_exceptions()
         async def terminate_process(
-            pid: int,
-            force: bool = False,
+            pid: int, # PID comes from path
+            request_body: TerminateRequest, # Force comes from body
             api_key: ApiKey = Depends(self.get_api_key)
         ) -> Dict[str, Any]:
             """Terminate a running process.
             
             Args:
                 pid: Process ID to terminate
-                force: Whether to force kill
+                request_body: Request body containing the force flag
                 api_key: Validated API key
                 
             Returns:
@@ -178,14 +186,15 @@ class CoreMCPServer(BaseServer):
                 )
                 
             # Terminate process
+            force_terminate = request_body.force # Get force from body
             with self.monitor.span_in_context(
                 "terminate_process",
                 attributes={
                     "pid": pid,
-                    "force": force
+                    "force": force_terminate # Use value from body
                 }
             ):
-                return self.executor.terminate(pid, force=force)
+                return self.executor.terminate(pid, force=force_terminate) # Pass correct value
                 
         @self.app.get("/api/v1/output/{pid}")
         @handle_exceptions()
@@ -243,18 +252,19 @@ class CoreMCPServer(BaseServer):
         @self.app.post("/api/v1/block")
         @handle_exceptions()
         async def block_command(
-            command: str,
+            request_body: CommandManageRequest, # Command from body
             api_key: ApiKey = Depends(self.get_api_key)
         ) -> Dict[str, Any]:
             """Add command to blacklist.
             
             Args:
-                command: Command pattern to block
+                request_body: Request body containing the command pattern
                 api_key: Validated API key
                 
             Returns:
                 Operation result
             """
+            command_to_block = request_body.command
             # Check permissions
             if not self.security.check_permission(api_key, "manage:blacklist"):
                 raise HTTPException(
@@ -265,29 +275,30 @@ class CoreMCPServer(BaseServer):
             # Add to blacklist
             with self.monitor.span_in_context(
                 "block_command",
-                attributes={"command": command}
+                attributes={"command": command_to_block}
             ):
-                self.executor.blacklist.add(command)
+                self.executor.blacklist.add(command_to_block)
                 return {
                     "status": "success",
-                    "message": f"Command pattern '{command}' blocked"
+                    "message": f"Command pattern '{command_to_block}' blocked"
                 }
                 
         @self.app.post("/api/v1/unblock")
         @handle_exceptions()
         async def unblock_command(
-            command: str,
+            request_body: CommandManageRequest, # Command from body
             api_key: ApiKey = Depends(self.get_api_key)
         ) -> Dict[str, Any]:
             """Remove command from blacklist.
             
             Args:
-                command: Command pattern to unblock
+                request_body: Request body containing the command pattern
                 api_key: Validated API key
                 
             Returns:
                 Operation result
             """
+            command_to_unblock = request_body.command
             # Check permissions
             if not self.security.check_permission(api_key, "manage:blacklist"):
                 raise HTTPException(
@@ -298,12 +309,12 @@ class CoreMCPServer(BaseServer):
             # Remove from blacklist
             with self.monitor.span_in_context(
                 "unblock_command",
-                attributes={"command": command}
+                attributes={"command": command_to_unblock}
             ):
-                self.executor.blacklist.discard(command)
+                self.executor.blacklist.discard(command_to_unblock)
                 return {
                     "status": "success",
-                    "message": f"Command pattern '{command}' unblocked"
+                    "message": f"Command pattern '{command_to_unblock}' unblocked"
                 }
 
 # App Factory pattern
