@@ -43,6 +43,7 @@ import digitalocean
 from digitalocean import Manager as DOManager_spec
 from server.llm.models import BaseModelConfig, PlaceholderModelConfig, OpenAIModelConfig, LocalModelConfig
 from server.utils.base_server import BaseServer
+from server.utils.command_execution import CommandExecutor
 
 # Add the parent directory to path to import the server module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -138,16 +139,23 @@ def core_client(mock_dependencies, base_test_config):
          patch("server.utils.error_handling.logger", mock_error_handler_logger) as MockErrLogger, \
          patch("slowapi.extension.Limiter._check_request_limit", lambda *args, **kwargs: None):
 
-        app = create_core_app()
+        # Call the modified factory function and unpack
+        app_instance, server_instance = create_core_app()
+        
+        # Explicitly set the security manager and executor on the server instance
+        server_instance.security = mock_security_manager
+        server_instance.executor = mock_dependencies.get("CommandExecutor", MagicMock(spec=CommandExecutor))
+        
+        # Attach necessary mocks to app state (using app_instance)
+        app_instance.state.config = config_to_use
+        app_instance.state.logger = mock_log_manager.return_value.get_logger.return_value
+        app_instance.state.security = mock_security_manager # Keep for state access if needed
+        app_instance.state.monitor = mock_monitor_constructor.return_value
+        app_instance.state.limiter = mock_dependencies.get("Limiter")
+        app_instance.state.executor = server_instance.executor # Ensure state has the same executor
 
-        # Attach necessary mocks to app state (mirroring BaseServer)
-        app.state.config = config_to_use
-        app.state.logger = mock_log_manager.return_value.get_logger.return_value
-        app.state.security = mock_security_manager
-        app.state.monitor = mock_monitor_constructor.return_value
-        app.state.limiter = mock_dependencies.get("Limiter")
-
-        with TestClient(app) as client:
+        # Pass the FastAPI instance to TestClient
+        with TestClient(app_instance) as client:
             yield client
 
 
@@ -580,8 +588,10 @@ def mock_neolocal_config():
 # Fixture for a base config (used by multiple server tests)
 @pytest.fixture(scope="session")
 def base_test_config():
+    """Fixture to provide a base ServerConfig for testing."""
+    # Use a real ServerConfig instance for better type checking and attribute access
     return ServerConfig(
-        name="test_server",
+        name="test-server",
         port=8001,
         log_level="DEBUG",
         api_keys={"test-key": {"permissions": ["read", "write"], "description": "Test Key"}},

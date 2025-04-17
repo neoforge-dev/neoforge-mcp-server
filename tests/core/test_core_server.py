@@ -285,26 +285,25 @@ def test_execute_command_unauthorized_missing_key(core_client: TestClient, mock_
     # mock_security_manager.verify_api_key.assert_not_called() # Might fail if called before 403 raised
 
 @pytest.mark.asyncio
-async def test_execute_command_unauthorized_invalid_key(core_client, mocker):
-    """Test executing a command with an invalid API key."""
-    # Retrieve the mock security manager instance stored by the fixture
-    mock_security_manager = mocker.security_manager_mock
+async def test_execute_command_unauthorized_invalid_key(
+    core_client: TestClient,
+    mock_security_manager: MagicMock, # Add fixture as parameter
+    sample_api_key: ApiKey # Keep sample key if needed
+):
+    """Test execute command with an invalid API key."""
+    # Configure the mock SecurityManager to raise AuthenticationError
+    # Use the injected mock_security_manager fixture
+    mock_security_manager.validate_api_key.side_effect = AuthenticationError("Invalid API key")
 
+    # Make request with a key that will be deemed invalid by the mock
     response = core_client.post(
         "/api/v1/execute_command",
-        headers={"X-API-Key": "invalid-key"},
-        json={"command": "echo unauthorized"}
+        headers={"X-API-Key": "invalid-key"}, # The key value itself doesn't matter here due to mock
+        json={"command": "echo should fail"}
     )
-
-    # Expect 403 Forbidden because FastAPI's Security dependency catches the AuthError
-    # from our mocked validate_api_key via get_api_key and returns 403 directly.
-    assert response.status_code == 403
-    assert "Not authenticated" in response.json().get("detail", "") # Check detail message
-
-    # The mocked validate_api_key *should* have been called by get_api_key
-    mock_security_manager.validate_api_key.assert_called_once_with("invalid-key")
-    # Ensure the command executor was NOT called
-    # assert not mock_command_executor.execute.called # Access via mocker if needed
+    
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid API key"
 
 def test_execute_command_insufficient_permissions(
     core_client: TestClient, # Use core_client

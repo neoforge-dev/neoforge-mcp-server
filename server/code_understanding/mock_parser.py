@@ -80,321 +80,348 @@ class MockParser:
     def __init__(self):
         self.language = 'javascript'
 
-    def parse(self, code):
-        """Parse code and return a MockTree.
-        
-        Args:
-            code: Code to parse
-            
-        Returns:
-            MockTree: Parsed tree
+    def parse(self, code, language=None):
         """
-        print("--- ENTERING MockParser.parse ---")
+        Parses code into a mock tree, trying to determine the language if not provided.
+        """
+        if not code:
+            return None
+
+        detected_language = language
+        
+        # Try to detect the language from the code if not specified
+        if not detected_language:
+            # Check for Python language markers
+            python_markers = ['def ', 'class ', 'import ', 'from ']
+            has_python_markers = any(marker in code for marker in python_markers)
+            
+            # Check for Swift language markers
+            swift_markers = ['func ', 'var ', 'let ', 'import ']
+            has_swift_markers = any(marker in code for marker in swift_markers)
+            
+            # Check for JavaScript language markers
+            js_markers = ['function ', 'const ', 'let ', 'var ', '=>']
+            has_js_markers = any(marker in code for marker in js_markers)
+            
+            # Prioritize detection based on multiple markers
+            if has_python_markers and not (has_swift_markers and has_js_markers):
+                detected_language = 'python'
+                logger.debug(f"Detected language: {detected_language} (from code patterns)")
+            elif has_swift_markers and not has_js_markers:
+                detected_language = 'swift'
+                logger.debug(f"Detected language: {detected_language} (from code patterns)")
+            elif has_js_markers:
+                detected_language = 'javascript'
+                logger.debug(f"Detected language: {detected_language} (from code patterns)")
+        
+        # If we still don't have a language, try to parse as Python using AST
+        if not detected_language:
+            try:
+                import ast
+                ast.parse(code)
+                detected_language = 'python'
+                logger.debug("Successfully parsed code with Python AST, assuming Python language")
+            except Exception as e:
+                logger.debug(f"Failed to parse as Python: {str(e)}")
+                # Default to a generic language
+                detected_language = 'generic'
+        
+        logger.info(f"MockParser: Using language '{detected_language}' for code")
+        
+        # Create a language-specific mock tree
+        if detected_language == 'python':
+            return self._create_python_mock_tree(code)
+        elif detected_language == 'swift':
+            return self._create_swift_mock_tree(code)
+        else:
+            # Generic fallback
+            return self._create_generic_mock_tree(code)
+
+    def _create_python_mock_tree(self, code):
+        """
+        Creates a mock tree for Python code with proper structure for imports, 
+        functions, and classes to help the analyzer extract information correctly.
+        """
+        logger.info("Creating Python-specific mock tree")
         
         try:
-            # Convert bytes to string if necessary
-            if isinstance(code, bytes):
-                code_str = code.decode('utf-8', errors='replace')
-            else:
-                code_str = code
-                
-            # Check for empty code
-            if not code_str or code_str.strip() == '':
-                print("--- EXITING MockParser.parse WITH WARNING: Empty code ---")
-                root = MockNode(type='file', children=[], start_point=(0, 0), end_point=(0, 0))
-                return MockTree(root_node=root)
+            import ast
+            tree = ast.parse(code)
             
-            # For test purposes, create a simple parse tree based on the language of the code
-            # Detect language based on patterns in the code
-            if 'import Foundation' in code_str or 'class ' in code_str or 'struct ' in code_str or 'func ' in code_str and '{' in code_str:
-                return self._create_swift_mock_tree(code_str)
-            elif 'import' in code_str and '{' in code_str and 'function' in code_str:
-                return self._create_js_mock_tree(code_str)
-            else:
-                # Default to Python-style parsing for backward compatibility
-                try:
-                    tree = ast.parse(code)
-                    root = self._convert_ast_to_mock_tree(tree)
-                    print(f"--- EXITING MockParser.parse SUCCESSFULLY ---")
-                    return MockTree(root_node=root)
-                except SyntaxError as e:
-                    # If Python parsing fails, try one more language detection
-                    if 'import' in code_str or 'class' in code_str or 'func' in code_str:
-                        return self._create_swift_mock_tree(code_str)
-                    else:
-                        # Create a generic file structure for any code
-                        return self._create_generic_mock_tree(code_str)
-                
-        except Exception as e:
-            logging.error(f"MockParser: Failed to parse code", exc_info=True)
-            print(f"--- EXITING MockParser.parse WITH ERROR: {str(e)} ---")
+            # Create the root node
+            root = MockNode("module", text="")
+            root.start_point = (0, 0)
+            root.end_point = (len(code.splitlines()), 0)
+            root.children = []
             
-            # Even on error, return a minimal tree with error flag
-            root = MockNode(type='file', children=[], start_point=(0, 0), end_point=(0, 0))
-            tree = MockTree(root_node=root)
-            tree.has_error = True
-            return tree
-
-    def _create_swift_mock_tree(self, code_str):
-        """Create a mock tree for Swift code.
-        
-        Args:
-            code_str: Swift code as a string
-            
-        Returns:
-            MockTree: Mock tree representing Swift code
-        """
-        print("--- Creating Swift mock tree ---")
-        lines = code_str.split('\n')
-        line_count = len(lines)
-        
-        # Create root node
-        root = MockNode(
-            type='source_file',
-            children=[],
-            start_point=(0, 0),
-            end_point=(line_count, 0)
-        )
-        
-        # Add import declarations
-        import_pattern = r'import\s+(\w+)'
-        for i, line in enumerate(lines):
-            match = re.search(import_pattern, line)
-            if match:
-                module = match.group(1)
-                import_node = MockNode(
-                    type='import_declaration',
-                    children=[],
-                    start_point=(i, line.find('import')),
-                    end_point=(i, len(line))
-                )
+            # Process the AST to create mock nodes
+            for node in tree.body:
+                if isinstance(node, ast.Import):
+                    # Handle simple imports: import os, sys
+                    for name in node.names:
+                        import_node = MockNode("import", text=f"import {name.name}")
+                        import_node.start_point = (node.lineno-1, node.col_offset)
+                        import_node.end_point = (node.end_lineno-1 if hasattr(node, 'end_lineno') else node.lineno-1, 
+                                                node.end_col_offset if hasattr(node, 'end_col_offset') else 100)
+                        
+                        # Create a proper alias node structure that matches what the analyzer expects
+                        name_node = MockNode("identifier", text=name.name)
+                        asname_node = MockNode("identifier", text=name.asname) if name.asname else None
+                        
+                        # Create fields for the alias node
+                        alias_fields = {'name': name_node}
+                        if asname_node:
+                            alias_fields['asname'] = asname_node
+                        
+                        # Create the alias node that will be a child of the import node
+                        alias_node = MockNode("alias", fields=alias_fields)
+                        
+                        # Set the import node's children and fields
+                        import_node.children = [alias_node]
+                        
+                        root.children.append(import_node)
+                        logger.debug(f"Added import node: import {name.name}")
                 
-                # Add module name as a child
-                module_node = MockNode(
-                    type='import_path_component',
-                    children=[],
-                    start_point=(i, line.find(module)),
-                    end_point=(i, line.find(module) + len(module))
-                )
-                
-                import_node.children.append(module_node)
-                root.children.append(import_node)
-        
-        # Add function declarations
-        func_pattern = r'func\s+(\w+)'
-        for i, line in enumerate(lines):
-            match = re.search(func_pattern, line)
-            if match:
-                func_name = match.group(1)
-                
-                # Find the closing brace for this function
-                end_line = i
-                brace_count = 0
-                for j in range(i, line_count):
-                    if '{' in lines[j]:
-                        brace_count += lines[j].count('{')
-                    if '}' in lines[j]:
-                        brace_count -= lines[j].count('}')
-                    if brace_count <= 0 and '}' in lines[j]:
-                        end_line = j
-                        break
-                
-                func_node = MockNode(
-                    type='function_declaration',
-                    children=[],
-                    start_point=(i, line.find('func')),
-                    end_point=(end_line, len(lines[end_line]) if end_line < line_count else 0)
-                )
-                
-                # Add function name as a child
-                name_node = MockNode(
-                    type='identifier',
-                    children=[],
-                    start_point=(i, line.find(func_name)),
-                    end_point=(i, line.find(func_name) + len(func_name))
-                )
-                
-                func_node.children.append(name_node)
-                
-                # Add parameter list if present
-                if '(' in line:
-                    param_start = line.find('(')
-                    param_end = line.find(')')
-                    if param_end > param_start:
-                        param_clause = MockNode(
-                            type='parameter_clause',
-                            children=[],
-                            start_point=(i, param_start),
-                            end_point=(i, param_end + 1)
-                        )
-                        func_node.children.append(param_clause)
-                
-                # Add return type if present
-                if '->' in line:
-                    return_start = line.find('->') + 2
-                    return_end = line.find('{', return_start)
-                    if return_end == -1:
-                        return_end = len(line)
-                    return_type = line[return_start:return_end].strip()
+                elif isinstance(node, ast.ImportFrom):
+                    # Handle from imports: from module import name
+                    module_prefix = f"from {node.module} import " if node.module else "from . import "
+                    names = ", ".join(n.name for n in node.names)
                     
-                    return_node = MockNode(
-                        type='return_type',
-                        children=[],
-                        start_point=(i, return_start),
-                        end_point=(i, return_start + len(return_type))
-                    )
-                    func_node.children.append(return_node)
+                    # Create a module node representing a 'from ... import' statement
+                    module_node = MockNode("module", text=f"{module_prefix}{names}")
+                    module_node.start_point = (node.lineno-1, node.col_offset)
+                    module_node.end_point = (node.end_lineno-1 if hasattr(node, 'end_lineno') else node.lineno-1, 
+                                            node.end_col_offset if hasattr(node, 'end_col_offset') else 100)
+                    
+                    # Create source module identifier node
+                    # Preserve leading dots for relative imports
+                    module_name = node.module if node.module else ""
+                    if node.level > 0:
+                        # Add the appropriate number of dots for relative imports
+                        relative_prefix = '.' * node.level
+                        module_name = f"{relative_prefix}{module_name}"
+                    
+                    source_module_node = MockNode("identifier", text=module_name)
+                    
+                    # Create alias nodes for each imported name
+                    name_alias_nodes = []
+                    for n in node.names:
+                        name_node = MockNode("identifier", text=n.name)
+                        asname_node = MockNode("identifier", text=n.asname) if n.asname else None
+                        
+                        # Create fields for the alias node
+                        alias_fields = {'name': name_node}
+                        if asname_node:
+                            alias_fields['asname'] = asname_node
+                        
+                        # Create the alias node
+                        name_alias_nodes.append(MockNode("alias", fields=alias_fields))
+                    
+                    # Setup fields and children
+                    module_node.fields = {
+                        'module': source_module_node,
+                        'names': name_alias_nodes
+                    }
+                    
+                    root.children.append(module_node)
+                    logger.debug(f"Added from import node: {module_prefix}{names}")
+                
+                elif isinstance(node, ast.FunctionDef):
+                    # Handle function definitions
+                    func_node = MockNode("function_definition", text=f"def {node.name}")
+                    func_node.start_point = (node.lineno-1, node.col_offset)
+                    func_node.end_point = (node.end_lineno-1 if hasattr(node, 'end_lineno') else node.lineno+5-1, 
+                                          node.end_col_offset if hasattr(node, 'end_col_offset') else 100)
+                    
+                    # Create name node
+                    name_node = MockNode("identifier", text=node.name)
+                    
+                    # Create parameters
+                    params_node = MockNode("parameters", text="")
+                    param_nodes = []
+                    
+                    for arg in node.args.args:
+                        param_node = MockNode("parameter", text=arg.arg)
+                        param_nodes.append(param_node)
+                    
+                    params_node.children = param_nodes
+                    
+                    # Setup fields and children
+                    func_node.fields = {"name": name_node, "parameters": params_node}
+                    func_node.children = [name_node, params_node]
+                    
+                    root.children.append(func_node)
+                    logger.debug(f"Added function node: def {node.name}")
+                
+                elif isinstance(node, ast.ClassDef):
+                    # Handle class definitions
+                    class_node = MockNode("class_definition", text=f"class {node.name}")
+                    class_node.start_point = (node.lineno-1, node.col_offset)
+                    class_node.end_point = (node.end_lineno-1 if hasattr(node, 'end_lineno') else node.lineno+5-1, 
+                                           node.end_col_offset if hasattr(node, 'end_col_offset') else 100)
+                    
+                    # Create name node
+                    name_node = MockNode("identifier", text=node.name)
+                    
+                    # Create base classes
+                    base_nodes = []
+                    for base in node.bases:
+                        if isinstance(base, ast.Name):
+                            base_node = MockNode("type_identifier", text=base.id)
+                            base_nodes.append(base_node)
+                    
+                    # Create inheritance clause if there are bases
+                    if base_nodes:
+                        inheritance_node = MockNode("inheritance_clause", text="")
+                        inheritance_node.children = base_nodes
+                        class_node.children = [name_node, inheritance_node]
+                    else:
+                        class_node.children = [name_node]
+                    
+                    # Create class body with methods
+                    class_body = MockNode("class_body", text="")
+                    body_nodes = []
+                    
+                    for method in node.body:
+                        if isinstance(method, ast.FunctionDef):
+                            method_node = MockNode("function_definition", text=f"def {method.name}")
+                            method_node.start_point = (method.lineno-1, method.col_offset)
+                            method_node.end_point = (method.end_lineno-1 if hasattr(method, 'end_lineno') else method.lineno+3-1,
+                                                   method.end_col_offset if hasattr(method, 'end_col_offset') else 100)
+                            
+                            # Create method name node
+                            method_name_node = MockNode("identifier", text=method.name)
+                            
+                            # Create parameters
+                            method_params_node = MockNode("parameters", text="")
+                            method_param_nodes = []
+                            
+                            for arg in method.args.args:
+                                param_node = MockNode("parameter", text=arg.arg)
+                                method_param_nodes.append(param_node)
+                            
+                            method_params_node.children = method_param_nodes
+                            
+                            # Setup fields and children
+                            method_node.fields = {"name": method_name_node, "parameters": method_params_node}
+                            method_node.children = [method_name_node, method_params_node]
+                            
+                            body_nodes.append(method_node)
+                    
+                    class_body.children = body_nodes
+                    class_node.children.append(class_body)
+                    
+                    # Setup fields
+                    class_node.fields = {"name": name_node, "body": class_body.children}
+                    if base_nodes:
+                        class_node.fields["bases"] = base_nodes
+                    
+                    root.children.append(class_node)
+                    logger.debug(f"Added class node: class {node.name} with {len(body_nodes)} methods")
+            
+            # Return a MockTree instead of just the root node
+            return MockTree(root_node=root)
+            
+        except Exception as e:
+            logger.error(f"Error creating Python mock tree: {str(e)}")
+            # Fall back to generic tree if AST parsing fails
+            return self._create_generic_mock_tree(code)
+
+    def _create_swift_mock_tree(self, code):
+        """Creates a mock tree for Swift code."""
+        logger.info("Creating Swift-specific mock tree")
+        # Simple implementation for now
+        return self._create_generic_mock_tree(code)
+
+    def _create_generic_mock_tree(self, code):
+        """Creates a generic mock tree for any code."""
+        logger.info("Creating generic mock tree")
+        
+        lines = code.splitlines()
+        root = MockNode("program", text="")
+        root.start_point = (0, 0)
+        root.end_point = (len(lines), 0)
+        root.children = []
+        
+        # Simple line-by-line processing
+        for i, line in enumerate(lines):
+            line = line.strip()
+            
+            # Try to detect imports
+            if line.startswith("import ") or line.startswith("from "):
+                import_node = MockNode("import", text=line)
+                import_node.start_point = (i, 0)
+                import_node.end_point = (i, len(line))
+                
+                # Extract module name (very basic)
+                if line.startswith("import "):
+                    module = line[7:].strip()
+                else:  # from ... import
+                    parts = line.split(" import ")
+                    # Preserve the entire module path including any leading dots
+                    module = parts[0][5:].strip() if len(parts) > 1 else ""
+                
+                # Create a module node
+                module_node = MockNode("identifier", text=module)
+                import_node.fields = {"name": module_node}
+                import_node.children = [module_node]
+                
+                root.children.append(import_node)
+            
+            # Try to detect function definitions
+            elif line.startswith("def "):
+                # Extract function name (very basic)
+                func_parts = line[4:].split("(")
+                func_name = func_parts[0].strip()
+                
+                func_node = MockNode("function_definition", text=line)
+                func_node.start_point = (i, 0)
+                # Set an approximate end line (assuming simple functions)
+                func_node.end_point = (i + 3, 0)
+                
+                # Create a name node
+                name_node = MockNode("identifier", text=func_name)
+                
+                # Create a parameters node (very basic)
+                params_str = func_parts[1].split(")")[0] if len(func_parts) > 1 else ""
+                params_node = MockNode("parameters", text=params_str)
+                params_node.children = []
+                
+                # Add individual parameter nodes
+                for param in params_str.split(","):
+                    param = param.strip()
+                    if param:
+                        param_node = MockNode("parameter", text=param)
+                        params_node.children.append(param_node)
+                
+                # Setup fields and children
+                func_node.fields = {"name": name_node, "parameters": params_node}
+                func_node.children = [name_node, params_node]
                 
                 root.children.append(func_node)
-        
-        # Add class declarations
-        class_pattern = r'class\s+(\w+)'
-        for i, line in enumerate(lines):
-            match = re.search(class_pattern, line)
-            if match:
-                class_name = match.group(1)
+            
+            # Try to detect class definitions
+            elif line.startswith("class "):
+                # Extract class name (very basic)
+                class_parts = line[6:].split(":")
+                class_name = class_parts[0].strip().split("(")[0]
                 
-                # Find the closing brace for this class
-                end_line = i
-                brace_count = 0
-                for j in range(i, line_count):
-                    if '{' in lines[j]:
-                        brace_count += lines[j].count('{')
-                    if '}' in lines[j]:
-                        brace_count -= lines[j].count('}')
-                    if brace_count <= 0 and '}' in lines[j]:
-                        end_line = j
-                        break
+                class_node = MockNode("class_definition", text=line)
+                class_node.start_point = (i, 0)
+                # Set an approximate end line (assuming simple classes)
+                class_node.end_point = (i + 5, 0)
                 
-                class_node = MockNode(
-                    type='class_declaration',
-                    children=[],
-                    start_point=(i, line.find('class')),
-                    end_point=(end_line, len(lines[end_line]) if end_line < line_count else 0)
-                )
+                # Create a name node
+                name_node = MockNode("identifier", text=class_name)
                 
-                # Add class name as a child
-                name_node = MockNode(
-                    type='identifier',
-                    children=[],
-                    start_point=(i, line.find(class_name)),
-                    end_point=(i, line.find(class_name) + len(class_name))
-                )
-                
-                class_node.children.append(name_node)
-                
-                # Add inheritance if present
-                if ':' in line:
-                    inherit_start = line.find(':') + 1
-                    inherit_end = line.find('{', inherit_start)
-                    if inherit_end == -1:
-                        inherit_end = len(line)
-                    inherit_text = line[inherit_start:inherit_end].strip()
-                    
-                    inherit_node = MockNode(
-                        type='inheritance_clause',
-                        children=[],
-                        start_point=(i, inherit_start),
-                        end_point=(i, inherit_start + len(inherit_text))
-                    )
-                    
-                    # Add each inherited type
-                    for inherited_type in inherit_text.split(','):
-                        inherited_type = inherited_type.strip()
-                        type_start = inherit_start + inherit_text.find(inherited_type)
-                        
-                        type_node = MockNode(
-                            type='type_identifier',
-                            children=[],
-                            start_point=(i, type_start),
-                            end_point=(i, type_start + len(inherited_type))
-                        )
-                        inherit_node.children.append(type_node)
-                    
-                    class_node.children.append(inherit_node)
-                
-                # Add class body
-                body_node = MockNode(
-                    type='class_body',
-                    children=[],
-                    start_point=(i, line.find('{')),
-                    end_point=(end_line, lines[end_line].find('}') + 1 if end_line < line_count else 0)
-                )
-                class_node.children.append(body_node)
+                # Setup fields and children
+                class_node.fields = {"name": name_node, "body": []}
+                class_node.children = [name_node]
                 
                 root.children.append(class_node)
         
-        # Create and return the tree
-        tree = MockTree(root_node=root)
-        print(f"--- EXITING MockParser.parse SUCCESSFULLY (Swift) ---")
-        return tree
-
-    def _create_js_mock_tree(self, code_str):
-        """Create a mock tree for JavaScript code.
-        
-        Args:
-            code_str: JavaScript code as a string
-            
-        Returns:
-            MockTree: Mock tree representing JavaScript code
-        """
-        # Similar implementation for JavaScript
-        print("--- Creating JS mock tree ---")
-        lines = code_str.split('\n')
-        line_count = len(lines)
-        
-        # Create root node
-        root = MockNode(
-            type='program',
-            children=[],
-            start_point=(0, 0),
-            end_point=(line_count, 0)
-        )
-        
-        # Create a simpler tree for JS 
-        # Add some basic nodes based on patterns in the code
-        
-        # Create and return the tree
-        tree = MockTree(root_node=root)
-        print(f"--- EXITING MockParser.parse SUCCESSFULLY (JS) ---")
-        return tree
-
-    def _create_generic_mock_tree(self, code_str):
-        """Create a generic mock tree for any code.
-        
-        Args:
-            code_str: Code as a string
-            
-        Returns:
-            MockTree: Generic mock tree
-        """
-        print("--- Creating generic mock tree ---")
-        lines = code_str.split('\n')
-        line_count = len(lines)
-        
-        # Create root node
-        root = MockNode(
-            type='file',
-            children=[],
-            start_point=(0, 0),
-            end_point=(line_count, 0)
-        )
-        
-        # Create a simple tree with line nodes
-        for i, line in enumerate(lines):
-            if line.strip():  # Skip empty lines
-                line_node = MockNode(
-                    type='line',
-                    children=[],
-                    start_point=(i, 0),
-                    end_point=(i, len(line))
-                )
-                root.children.append(line_node)
-        
-        # Create and return the tree
-        tree = MockTree(root_node=root)
-        print(f"--- EXITING MockParser.parse SUCCESSFULLY (Generic) ---")
-        return tree
+        # Return a MockTree instead of just the root node
+        return MockTree(root_node=root)
 
     def query(self, pattern: str) -> MockQuery:
         """Create a mock query."""
@@ -640,6 +667,7 @@ class MockParser:
             module_name = node.module or ''
             level = node.level
             module_prefix = '.' * level
+            # Prepend the dots to the module name properly
             full_module_name = f"{module_prefix}{module_name}"
             
             source_module_node = MockNode(type='identifier', text=full_module_name)

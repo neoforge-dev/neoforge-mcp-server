@@ -290,7 +290,27 @@ class CodeAnalyzer:
 
         for i, node in enumerate(root.children):
             logger.debug(f"[_extract_imports] Processing root child {i}: type='{node.type}'")
-            if node.type == 'import': # Handles 'import module' or 'import module as alias'
+            
+            # Handle Swift-style import nodes (from our MockParser)
+            if node.type == 'import_declaration':
+                logger.debug(f"  Found 'import_declaration' node from MockParser")
+                # Extract module name from import_path_component child
+                for child in node.children:
+                    if child.type == 'import_path_component':
+                        # This is the module name
+                        module_name = getattr(child, 'text', '')
+                        if module_name:
+                            imports.append({
+                                'type': 'import',
+                                'module': module_name,
+                                'alias': None,  # No alias in this format
+                                'start_line': node.start_point[0] + 1,
+                                'end_line': node.end_point[0] + 1
+                            })
+                            logger.debug(f"    Found import: module='{module_name}'")
+            
+            # Handle our MockParser 'import' type added for Python
+            elif node.type == 'import': # Handles 'import module' or 'import module as alias'
                 logger.debug(f"  Found 'import' node. Children count: {len(node.children)}")
                 # Children are 'alias' nodes
                 for j, alias_node in enumerate(node.children):
@@ -313,6 +333,8 @@ class CodeAnalyzer:
                             logger.warning(f"      Skipped alias node {j} due to missing 'name' field.")
                     else:
                         logger.warning(f"    Skipped alias child {j}: type mismatch or no fields.")
+            
+            # Handle 'from module import' type that uses 'module' node type
             elif node.type == 'module': # Handles 'from module import name' or 'from module import name as alias'
                 logger.debug(f"  Found 'module' node (represents ImportFrom). Fields: {hasattr(node, 'fields')}")
                 # 'module' type node represents the 'from' part in MockParser
@@ -353,78 +375,137 @@ class CodeAnalyzer:
         return imports
 
     def _extract_classes(self, root):
-        """Extract class definitions from a node."""
+        """Extract class definitions from the MockTree root node."""
         classes = []
-        logger.debug(f"[_extract_classes] Starting. Root children count: {len(root.children) if root and hasattr(root, 'children') else 'N/A'}")
+        logger.debug(f"[_extract_classes] Starting for {root.type if hasattr(root, 'type') else 'unknown'} node")
+        
         if not root or not hasattr(root, 'children'):
-            logger.debug("[_extract_classes] Root is None or has no children.")
             return classes
-
+            
         for i, node in enumerate(root.children):
-            logger.debug(f"[_extract_classes] Processing root child {i}: type='{node.type}'")
+            if not hasattr(node, 'type'):
+                continue
+            
+            logger.debug(f"[_extract_classes] Processing child {i}: type='{node.type}'")
+            
             if node.type == 'class_definition':
-                logger.debug(f"  Found 'class_definition' node. Fields: {hasattr(node, 'fields')}, Children: {len(node.children)}")
-                name_node = None
-                body_nodes = []
-                base_nodes = []
+                logger.debug(f"  Found class_definition node")
                 
-                # Extract name, body, and bases from fields (MockParser structure)
-                if hasattr(node, 'fields') and node.fields:
-                    name_node = node.fields.get("name")
-                    body_nodes = node.fields.get("body", []) # Expecting a list of method nodes
-                    base_nodes = node.fields.get("bases", []) # Expecting a list of identifier nodes
-                    
-                class_name = getattr(name_node, 'text', '[N/A]') if name_node else '[N/A]'
-                logger.debug(f"    Extracted class name='{class_name}' (from fields)")
-                logger.debug(f"    Found {len(body_nodes)} nodes in body field, {len(base_nodes)} nodes in bases field.")
-
-                if name_node:
-                    methods = []
-                    bases = []
-                    
-                    # Extract method names from body_nodes
-                    if isinstance(body_nodes, list):
-                        for body_item in body_nodes:
-                             # MockParser creates function_definition for methods
-                             if body_item and body_item.type == 'function_definition': 
-                                  # Find the method name within the function_definition's children
-                                  method_name_node = None
-                                  for child in body_item.children:
-                                      if child.type == 'name':
-                                          method_name_node = child
-                                          break
-                                  method_name = getattr(method_name_node, 'text', '[Unknown Method]')
-                                  logger.debug(f"      Found method: '{method_name}' (type: {body_item.type})")
-                                  if method_name_node:
-                                       methods.append({'name': method_name})
-                                  else:
-                                       logger.warning(f"      Could not find name child for method node: {body_item}")
-                             else:
-                                 logger.debug(f"      Skipping non-method node in body: {body_item.type if body_item else 'None'}")
-                                       
-                    # Extract base class names from base_nodes
-                    if isinstance(base_nodes, list):
-                         for base_node in base_nodes:
-                              # Assuming base_node is an identifier node with text
-                              if base_node and hasattr(base_node, 'text'):
-                                   base_name = base_node.text
-                                   logger.debug(f"      Found base class: '{base_name}'")
-                                   bases.append(base_name)
-                              else:
-                                  logger.warning(f"      Skipping invalid base node: {base_node}")
-                              
-                    classes.append({
-                        'name': getattr(name_node, 'text', ''),
-                        'start_line': node.start_point[0] + 1,
-                        'end_line': node.end_point[0] + 1,
-                        'methods': methods,
-                        'bases': bases
-                    })
-                    logger.debug(f"    Appended class '{class_name}' with {len(methods)} methods and {len(bases)} bases.")
-                else:
-                     logger.warning(f"    Skipped class definition node {i} due to missing 'name' field.")
-                     
-        logger.debug(f"[_extract_classes] Finished. Found {len(classes)} classes.")
+                # Get class name from fields or children
+                class_name = ""
+                
+                # Try getting name from fields
+                if hasattr(node, 'fields') and node.fields and 'name' in node.fields:
+                    name_node = node.fields.get('name')
+                    if name_node and hasattr(name_node, 'text'):
+                        class_name = name_node.text
+                        logger.debug(f"    Got class name from fields.name.text: {class_name}")
+                
+                # Try getting name from first child with type 'identifier'
+                if not class_name:
+                    for child in node.children:
+                        if hasattr(child, 'type') and child.type == 'identifier':
+                            if hasattr(child, 'text') and child.text:
+                                class_name = child.text
+                                logger.debug(f"    Got class name from identifier child: {class_name}")
+                                break
+                
+                # Skip if we couldn't find a name
+                if not class_name:
+                    logger.warning(f"    Skipped class definition node {i} due to missing 'name'.")
+                    continue
+                
+                # Extract base classes
+                bases = []
+                
+                # Look for inheritance clause in children
+                for child in node.children:
+                    if hasattr(child, 'type') and child.type == 'inheritance_clause':
+                        logger.debug(f"    Found inheritance_clause node")
+                        for base_node in child.children:
+                            if hasattr(base_node, 'type') and base_node.type == 'type_identifier':
+                                if hasattr(base_node, 'text') and base_node.text:
+                                    bases.append(base_node.text)
+                
+                # Create class info
+                class_info = {
+                    'name': class_name,
+                    'bases': bases,
+                    'start_line': node.start_point[0] + 1 if hasattr(node, 'start_point') else 0,
+                    'end_line': node.end_point[0] + 1 if hasattr(node, 'end_point') else 0,
+                    'methods': []
+                }
+                
+                # Extract methods from class body
+                class_body = None
+                for child in node.children:
+                    if hasattr(child, 'type') and child.type == 'class_body':
+                        class_body = child
+                        break
+                
+                if class_body and hasattr(class_body, 'children'):
+                    logger.debug(f"    Found class_body node with {len(class_body.children)} children")
+                    for method_node in class_body.children:
+                        if hasattr(method_node, 'type') and method_node.type == 'function_definition':
+                            method_name = ""
+                            
+                            # Try getting name from fields
+                            if hasattr(method_node, 'fields') and method_node.fields and 'name' in method_node.fields:
+                                name_node = method_node.fields.get('name')
+                                if name_node and hasattr(name_node, 'text'):
+                                    method_name = name_node.text
+                            
+                            # Try getting name from text attribute
+                            if not method_name and hasattr(method_node, 'text') and method_node.text:
+                                method_name = method_node.text
+                            
+                            # Try getting name from first child with type 'identifier'
+                            if not method_name:
+                                for c in method_node.children:
+                                    if hasattr(c, 'type') and c.type == 'identifier':
+                                        if hasattr(c, 'text') and c.text:
+                                            method_name = c.text
+                                            break
+                            
+                            if method_name:
+                                # Extract parameters
+                                parameters = []
+                                
+                                # Check for parameters in fields
+                                if hasattr(method_node, 'fields') and method_node.fields and 'parameters' in method_node.fields:
+                                    param_node = method_node.fields.get('parameters')
+                                    if param_node and hasattr(param_node, 'children'):
+                                        for p in param_node.children:
+                                            if hasattr(p, 'text'):
+                                                parameters.append({
+                                                    'name': p.text,
+                                                    'type': 'parameter',  # Default type
+                                                })
+                                
+                                # Create method info
+                                method_info = {
+                                    'name': method_name,
+                                    'parameters': parameters,
+                                    'start_line': method_node.start_point[0] + 1 if hasattr(method_node, 'start_point') else 0,
+                                    'end_line': method_node.end_point[0] + 1 if hasattr(method_node, 'end_point') else 0,
+                                }
+                                
+                                class_info['methods'].append(method_info)
+                                logger.debug(f"    Added method: {method_name}")
+                            else:
+                                logger.warning(f"    Skipped method node due to missing 'name'.")
+                
+                # Add class to results
+                classes.append(class_info)
+                logger.debug(f"  Added class: {class_name} with {len(class_info['methods'])} methods")
+                
+            # Process nested nodes (but not for functions)
+            elif node.type not in ('function_definition'):
+                for child in node.children:
+                    child_classes = self._extract_classes(child)
+                    classes.extend(child_classes)
+        
+        logger.debug(f"[_extract_classes] Finished. Found {len(classes)} classes")
         return classes
 
     def _extract_variables(self, root):
@@ -475,35 +556,99 @@ class CodeAnalyzer:
         return variables
 
     def _extract_functions(self, root):
-        """Extract function definitions from a node."""
+        """Extract function definitions from the MockTree root node."""
         functions = []
-        logger.debug(f"[_extract_functions] Starting. Root children count: {len(root.children) if root and hasattr(root, 'children') else 'N/A'}")
+        logger.debug(f"[_extract_functions] Starting for {root.type if hasattr(root, 'type') else 'unknown'} node")
+        
         if not root or not hasattr(root, 'children'):
-            logger.debug("[_extract_functions] Root is None or has no children.")
             return functions
             
         for i, node in enumerate(root.children):
-            logger.debug(f"[_extract_functions] Processing root child {i}: type='{node.type}'")
-            if node.type == 'function_definition':
-                logger.debug(f"  Found 'function_definition' node. Fields: {hasattr(node, 'fields')}, Children: {len(node.children)}")
-                # Find the name node within the children (MockParser puts it here)
-                name_node = None
-                for child in node.children:
-                    if child.type == 'name':
-                        name_node = child
-                        break 
+            if not hasattr(node, 'type'):
+                continue
                 
-                func_name = getattr(name_node, 'text', '[N/A]') if name_node else '[N/A]'
-                logger.debug(f"    Extracted function name='{func_name}' (from children)")
-                if name_node:
-                     # TODO: Extract parameters, return type etc.
-                     functions.append({
-                          'name': getattr(name_node, 'text', ''),
-                          'start_line': node.start_point[0] + 1,
-                          'end_line': node.end_point[0] + 1,
-                     })
-                else:
-                     logger.warning(f"    Skipped function definition node {i} due to missing 'name' child node.")
-                     
-        logger.debug(f"[_extract_functions] Finished. Found {len(functions)} functions.")
+            logger.debug(f"[_extract_functions] Processing child {i}: type='{node.type}'")
+            
+            # Handle function definition nodes
+            if node.type == 'function_definition':
+                logger.debug(f"  Found function_definition node")
+                
+                # Attempt to get function name from fields dictionary
+                name = None
+                
+                # Try getting name from fields
+                if hasattr(node, 'fields') and node.fields and 'name' in node.fields:
+                    name_node = node.fields.get('name')
+                    if name_node and hasattr(name_node, 'text'):
+                        name = name_node.text
+                        logger.debug(f"    Got name from fields.name.text: {name}")
+                
+                # Try getting name from text attribute directly
+                if not name and hasattr(node, 'text') and node.text:
+                    name = node.text
+                    logger.debug(f"    Got name from text attribute: {name}")
+                
+                # Try getting name from first child with type 'identifier'
+                if not name:
+                    for child in node.children:
+                        if hasattr(child, 'type') and child.type == 'identifier':
+                            if hasattr(child, 'text') and child.text:
+                                name = child.text
+                                logger.debug(f"    Got name from identifier child: {name}")
+                                break
+                
+                # Skip if we couldn't find a name
+                if not name:
+                    logger.warning(f"    Skipped function definition node {i} due to missing 'name' child node.")
+                    continue
+                    
+                # Create function info
+                function_info = {
+                    'name': name,
+                    'start_line': node.start_point[0] + 1 if hasattr(node, 'start_point') else 0,
+                    'end_line': node.end_point[0] + 1 if hasattr(node, 'end_point') else 0,
+                    'is_method': False,  # Methods are determined by context in a class
+                }
+                
+                # Add parameters if available
+                parameters = []
+                if hasattr(node, 'fields') and node.fields and 'parameters' in node.fields:
+                    param_node = node.fields.get('parameters')
+                    if param_node and hasattr(param_node, 'children'):
+                        for p in param_node.children:
+                            if hasattr(p, 'text'):
+                                parameters.append({
+                                    'name': p.text,
+                                    'type': 'parameter',  # Default type
+                                })
+                
+                function_info['parameters'] = parameters
+                functions.append(function_info)
+                logger.debug(f"  Added function: {name} with {len(parameters)} parameters")
+            
+            # Process classes to extract methods
+            elif node.type == 'class_definition':
+                logger.debug(f"  Found class_definition node (methods belong to classes)")
+                
+                # Get class name - useful for debugging but not directly needed here
+                class_name = ""
+                if hasattr(node, 'fields') and node.fields and 'name' in node.fields:
+                    name_node = node.fields.get('name')
+                    if name_node and hasattr(name_node, 'text'):
+                        class_name = name_node.text
+                
+                # Look for methods in class body
+                # Class methods are not included in top-level functions
+                for child in node.children:
+                    if hasattr(child, 'type') and child.type == 'class_body':
+                        logger.debug(f"    Found class_body node. Methods in this body are NOT top-level functions.")
+                        # We intentionally don't process functions in class body for top-level functions
+            
+            # Recursively process all other node types (except classes)
+            elif node.type not in ('class_definition'):
+                for child in node.children:
+                    child_functions = self._extract_functions(child)
+                    functions.extend(child_functions)
+        
+        logger.debug(f"[_extract_functions] Finished. Found {len(functions)} functions")
         return functions

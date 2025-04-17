@@ -2,7 +2,7 @@
 Core MCP Server - Provides core functionality and command execution.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 from fastapi import Depends, HTTPException, Security, Request, FastAPI, Body
 from fastapi.security import APIKeyHeader
 from fastapi.responses import StreamingResponse
@@ -195,14 +195,20 @@ def get_security_manager() -> SecurityManager:
     raise NotImplementedError("This dependency provider is intended for test overrides.")
 
 # Factory function remains separate
-def create_app(config=None, env=None) -> FastAPI:
+def create_app(config=None, env=None) -> Tuple[FastAPI, CoreMCPServer]: # Return tuple
     """Factory function to create the FastAPI application."""
-    server = CoreMCPServer()
+    server = CoreMCPServer() # Creates server, loads config via BaseServer init
+    
+    # Create the FastAPI app
     app = FastAPI(title=server.config.name, version=server.config.version)
+    
+    # Use the server instance to set up the app
     server.setup_app_state(app) # Setup state
     server.setup_middleware(app) # Setup middleware
     server.register_routes(app)  # Register routes
-    return app
+
+    # Return both the app and the server instance
+    return app, server
 
 # Remove direct instantiation
 # server = CoreMCPServer()
