@@ -1,24 +1,24 @@
 # Tech Context
 
 ## Core Stack
-- **Lang/Framework:** Python 3.11+, FastAPI, Pydantic
+- **Lang/Framework:** Python 3.12+, FastAPI, Pydantic
 - **Testing:** Pytest (+ asyncio, cov, mock)
 - **Code Quality:** Ruff, Mypy
 - **Config:** PyYAML, python-dotenv
 - **Monitoring:** OpenTelemetry SDK, Prometheus client (planned)
 - **Logging:** Loguru
 - **HTTP:** httpx
-- **Key Libs:** psutil, tiktoken, tree-sitter
+- **Key Libs:** psutil, tiktoken, tree-sitter (+ tree-sitter-languages)
 
 ## Setup
-- Activate venv: `source .venv/bin/activate`
-- Install deps: `pip install -r requirements.txt`
+- **Env:** `.venv`
+- **Activate:** `source .venv/bin/activate`
+- **Install:** `pip install -e .` (uses `pyproject.toml`)
 
 ## Config Files
-- Secrets: `.env`
-- Server Settings: `config/<server_name>.yml`
-- API Keys: In `.yml`, managed by `SecurityManager`
+- **Secrets:** `.env`
+- **Settings:** `config/<server_name>.yml` (API Keys via `SecurityManager`)
 
 ## Goals (Summary)
-- **Primary:** TDD >90% coverage.
-- **Secondary:** Security, Perf (<100ms API), Scalability.
+- **Primary:** Resolve Parser Tech Debt (Phase 1), TDD >90%.
+- **Secondary:** Security, Perf (<100ms), Scalability.

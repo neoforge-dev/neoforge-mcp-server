@@ -13,6 +13,11 @@ from collections import defaultdict
 from .error_handling import SecurityError, AuthenticationError, AuthorizationError
 import logging
 from fastapi import HTTPException
+from datetime import datetime, timedelta
+from jose import jwt
+import uuid
+import redis
+from fastapi.security import APIKeyHeader
 
 @dataclass
 class ApiKey:
@@ -20,22 +25,21 @@ class ApiKey:
     
     # Key details
     key_id: str
-    key_hash: str
+    hashed_key: str
+    name: str
+    roles: List[str]
+    rate_limit: str
     
     # Key metadata
-    name: str
-    created_at: float
-    expires_at: Optional[float] = None
-    
-    # Permissions
-    roles: Set[str] = field(default_factory=set)
-    scopes: Set[str] = field(default_factory=set)
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+    is_active: bool = True
     
     def is_expired(self) -> bool:
         """Check if key is expired."""
         return (
             self.expires_at is not None
-            and time.time() > self.expires_at
+            and datetime.utcnow() > self.expires_at
         )
         
     def has_role(self, role: str) -> bool:
@@ -44,7 +48,7 @@ class ApiKey:
         
     def has_scope(self, scope: str) -> bool:
         """Check if key has scope."""
-        return scope in self.scopes
+        return scope in self.roles
 
 class RateLimiter:
     """Rate limiter implementation."""
@@ -101,34 +105,27 @@ class SecurityManager:
     
     def __init__(
         self,
-        api_keys: Dict[str, Dict[str, Any]],
+        redis_url: str = "redis://localhost:6379/0",
+        jwt_secret: str = None,
+        api_keys: Optional[Dict[str, Dict[str, Any]]] = None,
         enable_auth: bool = True,
-        auth_token: Optional[str] = None
+        auth_token: Optional[str] = None,
+        rate_limit_window: int = 60,  # 1 minute
+        rate_limit_max_requests: int = 100,  # 100 requests per minute
+        blocked_ips: Optional[Set[str]] = None
     ):
-        """Initialize security manager.
-        
-        Args:
-            api_keys: Dictionary of API keys and their permissions
-            enable_auth: Whether to enable authentication
-            auth_token: Optional auth token for server-to-server communication
-        """
+        """Initialize security manager."""
+        self.redis = redis.from_url(redis_url)
+        self.jwt_secret = jwt_secret or secrets.token_hex(32)
         self.enable_auth = enable_auth
         self.auth_token = auth_token
-        self.logger = logging.getLogger(__name__)
+        self.rate_limit_window = rate_limit_window
+        self.rate_limit_max_requests = rate_limit_max_requests
+        self.blocked_ips = blocked_ips or set()
         
         # Initialize API keys
-        self.api_keys: Dict[str, ApiKey] = {}
-        for key, info in api_keys.items():
-            self.api_keys[key] = ApiKey(
-                key_id=key,
-                key_hash=hashlib.sha256(key.encode()).hexdigest(),
-                name=key,
-                created_at=info.get("created_at", time.time()),
-                expires_at=info.get("expires_at"),
-                roles=set(info.get("roles", [])),
-                scopes=set(info.get("scopes", []))
-            )
-            
+        self._init_api_keys(api_keys or {})
+        
         # Role definitions
         self.roles: Dict[str, Set[str]] = {
             'admin': {'*'},  # Admin has all permissions
@@ -156,16 +153,42 @@ class SecurityManager:
         thread = threading.Thread(target=cleanup, daemon=True)
         thread.start()
         
-    def check_rate_limit(self, key: str) -> bool:
-        """Check if key has exceeded rate limit.
-        
-        Args:
-            key: Rate limit key (e.g. IP address)
+    def check_rate_limit(self, api_key: str, client_ip: str) -> bool:
+        """Check if request is within rate limits."""
+        if client_ip in self.blocked_ips:
+            raise SecurityError(
+                message="IP address is blocked",
+                details={"code": ErrorCode.SECURITY_ERROR}
+            )
             
-        Returns:
-            True if within limit, False if exceeded
-        """
-        return self.rate_limiter.check_limit(key)
+        # Validate key and get rate limit
+        key_data = self.validate_api_key(api_key)
+        rate_limit = key_data.rate_limit
+        
+        # Parse rate limit
+        try:
+            limit, period = rate_limit.split("/")
+            limit = int(limit)
+            if period == "second":
+                window = 1
+            elif period == "minute":
+                window = 60
+            elif period == "hour":
+                window = 3600
+            else:
+                window = 86400  # day
+        except (ValueError, KeyError):
+            # Default to global rate limit
+            limit = self.rate_limit_max_requests
+            window = self.rate_limit_window
+            
+        # Check rate limit in Redis
+        key = f"ratelimit:{key_data.key_id}:{int(datetime.utcnow().timestamp() / window)}"
+        current = self.redis.incr(key)
+        if current == 1:
+            self.redis.expire(key, window)
+            
+        return current <= limit
         
     def _generate_key(self) -> Tuple[str, str]:
         """Generate new API key and hash.
@@ -186,82 +209,139 @@ class SecurityManager:
         
         return key, key_hash
         
+    def _init_api_keys(self, api_keys: Dict[str, Dict[str, Any]]) -> None:
+        """Initialize API keys in Redis."""
+        for key_id, key_data in api_keys.items():
+            # Hash the API key
+            api_key = key_data.get("key")
+            if not api_key:
+                continue
+                
+            hashed_key = self._hash_key(api_key)
+            
+            # Create API key object
+            key_obj = ApiKey(
+                key_id=key_id,
+                hashed_key=hashed_key,
+                name=key_data.get("name", ""),
+                roles=key_data.get("roles", []),
+                rate_limit=key_data.get("rate_limit", f"{self.rate_limit_max_requests}/minute"),
+                created_at=datetime.utcnow(),
+                expires_at=None if key_data.get("never_expires", False) else 
+                    datetime.utcnow() + timedelta(days=key_data.get("expires_in_days", 365)),
+                is_active=key_data.get("is_active", True)
+            )
+            
+            # Store in Redis
+            self.redis.hset(
+                f"api_key:{key_id}",
+                mapping={
+                    "hashed_key": key_obj.hashed_key,
+                    "name": key_obj.name,
+                    "roles": ",".join(key_obj.roles),
+                    "rate_limit": key_obj.rate_limit,
+                    "created_at": key_obj.created_at.isoformat(),
+                    "expires_at": key_obj.expires_at.isoformat() if key_obj.expires_at else "",
+                    "is_active": "1" if key_obj.is_active else "0"
+                }
+            )
+    
+    def _hash_key(self, key: str) -> str:
+        """Hash an API key."""
+        return hashlib.sha256(key.encode()).hexdigest()
+    
     def create_api_key(
         self,
         name: str,
-        roles: Optional[Set[str]] = None,
-        scopes: Optional[Set[str]] = None,
-        expires_in: Optional[float] = None
-    ) -> Tuple[str, ApiKey]:
-        """Create new API key.
+        roles: List[str],
+        rate_limit: Optional[str] = None,
+        expires_in_days: Optional[int] = 365,
+        never_expires: bool = False
+    ) -> Dict[str, str]:
+        """Create a new API key."""
+        # Generate key ID and key
+        key_id = str(uuid.uuid4())
+        api_key = secrets.token_urlsafe(32)
         
-        Args:
-            name: Key name
-            roles: Assigned roles
-            scopes: Assigned scopes
-            expires_in: Expiration time in seconds
-            
-        Returns:
-            Tuple of (key, ApiKey)
-        """
-        # Generate key
-        key, key_hash = self._generate_key()
-        key_id = hashlib.sha256(key_hash.encode()).hexdigest()[:8]
-        
-        # Create API key
-        api_key = ApiKey(
+        # Create and store key object
+        key_obj = ApiKey(
             key_id=key_id,
-            key_hash=key_hash,
+            hashed_key=self._hash_key(api_key),
             name=name,
-            created_at=time.time(),
-            expires_at=time.time() + expires_in if expires_in else None,
-            roles=set(roles or []),
-            scopes=set(scopes or [])
+            roles=roles,
+            rate_limit=rate_limit or f"{self.rate_limit_max_requests}/minute",
+            created_at=datetime.utcnow(),
+            expires_at=None if never_expires else datetime.utcnow() + timedelta(days=expires_in_days),
+            is_active=True
         )
         
-        # Store key
-        self.api_keys[key_id] = api_key
+        # Store in Redis
+        self.redis.hset(
+            f"api_key:{key_id}",
+            mapping={
+                "hashed_key": key_obj.hashed_key,
+                "name": key_obj.name,
+                "roles": ",".join(key_obj.roles),
+                "rate_limit": key_obj.rate_limit,
+                "created_at": key_obj.created_at.isoformat(),
+                "expires_at": key_obj.expires_at.isoformat() if key_obj.expires_at else "",
+                "is_active": "1"
+            }
+        )
         
-        return key, api_key
-        
+        return {
+            "key_id": key_id,
+            "api_key": api_key
+        }
+    
     def validate_api_key(self, api_key: str) -> ApiKey:
-        """Validate an API key.
-        
-        Args:
-            api_key: The API key to validate
-            
-        Returns:
-            ApiKey object if valid
-            
-        Raises:
-            AuthenticationError if key is invalid
-        """
-        if not self.enable_auth:
-            return ApiKey(key="anonymous", roles=set(), scopes=set("*:*"[:-1]))
-            
+        """Validate an API key and return key data."""
         if not api_key:
-            raise AuthenticationError(
+            raise SecurityError(
                 message="API key is required",
-                details={"error": "missing_api_key"}
+                details={"code": ErrorCode.API_KEY_ERROR}
             )
             
-        # Check if key exists
-        if api_key not in self.api_keys:
-            raise AuthenticationError(
-                message="Invalid API key",
-                details={"error": "invalid_api_key"}
-            )
-            
-        key_info = self.api_keys[api_key]
+        # Hash the provided key
+        hashed_key = self._hash_key(api_key)
         
-        # Check if key is expired
-        if key_info.expires_at and time.time() > key_info.expires_at:
-            raise AuthenticationError(
-                message="API key has expired",
-                details={"error": "expired_api_key"}
-            )
-            
-        return key_info
+        # Search for matching key in Redis
+        for key in self.redis.scan_iter("api_key:*"):
+            key_data = self.redis.hgetall(key)
+            if key_data.get("hashed_key") == hashed_key:
+                # Check if key is active
+                if key_data.get("is_active") != "1":
+                    raise SecurityError(
+                        message="API key is inactive",
+                        details={"code": ErrorCode.API_KEY_ERROR}
+                    )
+                
+                # Check expiration
+                expires_at = key_data.get("expires_at")
+                if expires_at and expires_at != "":
+                    expiry = datetime.fromisoformat(expires_at)
+                    if expiry < datetime.utcnow():
+                        raise SecurityError(
+                            message="API key has expired",
+                            details={"code": ErrorCode.API_KEY_ERROR}
+                        )
+                
+                # Return key data
+                return ApiKey(
+                    key_id=key.decode().split(":")[1],
+                    hashed_key=key_data["hashed_key"],
+                    name=key_data["name"],
+                    roles=key_data["roles"].split(","),
+                    rate_limit=key_data["rate_limit"],
+                    created_at=datetime.fromisoformat(key_data["created_at"]),
+                    expires_at=datetime.fromisoformat(key_data["expires_at"]) if key_data["expires_at"] else None,
+                    is_active=key_data["is_active"] == "1"
+                )
+        
+        raise SecurityError(
+            message="Invalid API key",
+            details={"code": ErrorCode.API_KEY_ERROR}
+        )
         
     def check_permission(self, api_key: ApiKey, permission: str) -> bool:
         """Check if an API key has a specific permission.
@@ -278,16 +358,16 @@ class SecurityManager:
             return True
             
         # Check for wildcard permission
-        if "*:*" in api_key.scopes:
+        if "*:*" in api_key.roles:
             return True
             
         # Check for specific permission
-        if permission in api_key.scopes:
+        if permission in api_key.roles:
             return True
             
         # Check for wildcard namespace
         namespace = permission.split(":")[0]
-        if f"{namespace}:*" in api_key.scopes:
+        if f"{namespace}:*" in api_key.roles:
             return True
 
         # Check permissions granted by the key's roles
@@ -330,14 +410,16 @@ class SecurityManager:
             return wrapper
         return decorator
         
-    def revoke_api_key(self, api_key: str) -> None:
-        """Revoke an API key.
-        
-        Args:
-            api_key: The API key to revoke
-        """
-        if api_key in self.api_keys:
-            del self.api_keys[api_key]
+    def revoke_api_key(self, key_id: str) -> None:
+        """Revoke an API key."""
+        key = f"api_key:{key_id}"
+        if not self.redis.exists(key):
+            raise SecurityError(
+                message="API key not found",
+                details={"code": ErrorCode.API_KEY_ERROR}
+            )
+            
+        self.redis.hset(key, "is_active", "0")
         
     def list_api_keys(self) -> List[Dict[str, Any]]:
         """List all API keys.
@@ -346,15 +428,16 @@ class SecurityManager:
             List of API key information
         """
         keys = []
-        for key_id, api_key in self.api_keys.items():
+        for key_id, api_key in self.redis.hscan_iter("api_key:*"):
+            key_data = self.redis.hgetall(key_id)
             keys.append({
-                'key_id': key_id,
-                'name': api_key.name,
-                'created_at': api_key.created_at,
-                'expires_at': api_key.expires_at,
-                'roles': list(api_key.roles),
-                'scopes': list(api_key.scopes),
-                'expired': api_key.is_expired()
+                'key_id': key_id.decode(),
+                'name': key_data["name"].decode(),
+                'created_at': datetime.fromisoformat(key_data["created_at"].decode()),
+                'expires_at': datetime.fromisoformat(key_data["expires_at"].decode()) if key_data["expires_at"] else None,
+                'roles': [role.decode() for role in key_data["roles"].split(",")],
+                'rate_limit': key_data["rate_limit"].decode(),
+                'expired': api_key.decode() == "0" or self.check_rate_limit(key_id.decode(), "")
             })
         return keys
         
@@ -409,7 +492,45 @@ class SecurityManager:
         Returns:
             ApiKey object if key exists, None otherwise
         """
-        return self.api_keys.get(api_key)
+        return self.validate_api_key(api_key)
+
+    def block_ip(self, ip: str) -> None:
+        """Block an IP address."""
+        self.blocked_ips.add(ip)
+        self.redis.sadd("blocked_ips", ip)
+    
+    def unblock_ip(self, ip: str) -> None:
+        """Unblock an IP address."""
+        self.blocked_ips.discard(ip)
+        self.redis.srem("blocked_ips", ip)
+    
+    def create_jwt_token(self, key_id: str, expires_in: int = 3600) -> str:
+        """Create a JWT token for an API key."""
+        key_data = self.redis.hgetall(f"api_key:{key_id}")
+        if not key_data:
+            raise SecurityError(
+                message="API key not found",
+                details={"code": ErrorCode.API_KEY_ERROR}
+            )
+            
+        payload = {
+            "sub": key_id,
+            "name": key_data["name"],
+            "roles": key_data["roles"].split(","),
+            "exp": datetime.utcnow() + timedelta(seconds=expires_in)
+        }
+        
+        return jwt.encode(payload, self.jwt_secret, algorithm="HS256")
+    
+    def validate_jwt_token(self, token: str) -> Dict[str, Any]:
+        """Validate a JWT token."""
+        try:
+            return jwt.decode(token, self.jwt_secret, algorithms=["HS256"])
+        except jwt.InvalidTokenError as e:
+            raise SecurityError(
+                message="Invalid JWT token",
+                details={"code": ErrorCode.TOKEN_ERROR, "error": str(e)}
+            )
 
 # --- Command Security --- 
 

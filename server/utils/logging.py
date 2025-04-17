@@ -11,170 +11,222 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 from .error_handling import MCPError
+import structlog
+from pythonjsonlogger import jsonlogger
 
-class JSONFormatter(logging.Formatter):
-    """JSON formatter for structured logging."""
+class CustomJsonFormatter(jsonlogger.JsonFormatter):
+    """Custom JSON formatter with additional fields."""
     
-    def __init__(
-        self,
-        fmt: Optional[str] = None,
-        datefmt: Optional[str] = None,
-        style: str = '%'
-    ):
-        """Initialize JSON formatter.
+    def add_fields(self, log_record: Dict[str, Any], record: logging.LogRecord, message_dict: Dict[str, Any]) -> None:
+        """Add custom fields to the log record."""
+        super().add_fields(log_record, record, message_dict)
         
-        Args:
-            fmt: Format string
-            datefmt: Date format string
-            style: Format style
-        """
-        super().__init__(fmt, datefmt, style)
-        self.validate = True
+        # Add timestamp
+        log_record['timestamp'] = datetime.utcnow().isoformat()
+        log_record['level'] = record.levelname
+        log_record['logger'] = record.name
         
-    def format(self, record: logging.LogRecord) -> str:
-        """Format log record as JSON."""
-        # Get basic record attributes
-        data = {
-            'timestamp': datetime.fromtimestamp(record.created).isoformat(),
-            'level': record.levelname,
-            'logger': record.name,
-            'message': record.getMessage(),
-            'module': record.module,
-            'line': record.lineno
-        }
+        # Add process/thread info
+        log_record['process'] = record.process
+        log_record['process_name'] = record.processName
+        log_record['thread'] = record.thread
+        log_record['thread_name'] = record.threadName
         
-        # Add fields from the 'extra' dictionary if it exists
-        if hasattr(record, 'extra') and isinstance(record.extra, dict):
-            for key, value in record.extra.items():
-                if key not in data: # Avoid overwriting standard fields
-                    data[key] = value
+        # Add file info
+        log_record['file'] = record.filename
+        log_record['line'] = record.lineno
+        log_record['function'] = record.funcName
 
-        # Add any other record attributes not already included and not private
-        # This is less reliable than using 'extra' but can catch other fields
-        for key, value in record.__dict__.items():
-            if key not in data and key not in ['args', 'asctime', 'created', 'exc_info', 'exc_text', 'filename', 'funcName', 'levelname', 'levelno', 'lineno', 'module', 'msecs', 'message', 'msg', 'name', 'pathname', 'process', 'processName', 'relativeCreated', 'stack_info', 'thread', 'threadName', 'extra'] and not key.startswith('_'):
-                data[key] = value
-        
-        # Add exception info if present
-        if record.exc_info:
-            data['exception'] = {
-                'type': record.exc_info[0].__name__,
-                'message': str(record.exc_info[1]),
-                'traceback': self.formatException(record.exc_info)
-            }
-            
-        return json.dumps(data)
+def setup_structlog():
+    """Configure structlog for structured logging."""
+    structlog.configure(
+        processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.UnicodeDecoder(),
+            structlog.processors.JSONRenderer()
+        ],
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
+        cache_logger_on_first_use=True,
+    )
 
 class LogManager:
-    """Manages logging setup and configuration."""
+    """Manager for logging configuration."""
     
     def __init__(
         self,
         name: str,
-        log_dir: Union[str, Path] = "logs",
-        log_level: Union[str, int] = logging.INFO,
-        max_size: int = 10 * 1024 * 1024,  # 10MB
-        backup_count: int = 5,
-        json_format: bool = True,
-        console_output: bool = True
+        log_level: str = "INFO",
+        log_dir: Optional[str] = None,
+        log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        log_rotation: str = "D",
+        log_retention: int = 7,
+        enable_json: bool = True,
+        enable_console: bool = True,
+        enable_file: bool = True,
+        enable_syslog: bool = False,
+        syslog_address: Optional[str] = None,
+        enable_structlog: bool = True
     ):
-        """Initialize log manager.
+        """Initialize logging manager.
         
         Args:
             name: Logger name
-            log_dir: Directory for log files
             log_level: Logging level
-            max_size: Maximum log file size in bytes
-            backup_count: Number of backup files to keep
-            json_format: Whether to use JSON formatting
-            console_output: Whether to output to console
+            log_dir: Directory for log files
+            log_format: Log format string
+            log_rotation: Log rotation interval
+            log_retention: Number of days to retain logs
+            enable_json: Enable JSON formatting
+            enable_console: Enable console logging
+            enable_file: Enable file logging
+            enable_syslog: Enable syslog logging
+            syslog_address: Syslog server address
+            enable_structlog: Enable structured logging
         """
         self.name = name
-        self.log_dir = Path(log_dir)
-        self.log_level = log_level
-        self.max_size = max_size
-        self.backup_count = backup_count
-        self.json_format = json_format
-        self.console_output = console_output
+        self.log_level = getattr(logging, log_level.upper())
+        self.log_dir = Path(log_dir) if log_dir else Path("logs")
+        self.log_format = log_format
+        self.log_rotation = log_rotation
+        self.log_retention = log_retention
+        self.enable_json = enable_json
+        self.enable_console = enable_console
+        self.enable_file = enable_file
+        self.enable_syslog = enable_syslog
+        self.syslog_address = syslog_address
+        self.enable_structlog = enable_structlog
         
         # Create logger
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(log_level)
+        self.logger = self._setup_logger()
+        
+    def _setup_logger(self) -> logging.Logger:
+        """Set up the logger with handlers."""
+        # Create logger
+        logger = logging.getLogger(self.name)
+        logger.setLevel(self.log_level)
         
         # Remove existing handlers
-        self.logger.handlers = []
+        logger.handlers = []
         
-        # Setup handlers
-        self._setup_handlers()
-        
-    def _setup_handlers(self) -> None:
-        """Setup log handlers."""
         # Create formatters
-        if self.json_format:
-            formatter = JSONFormatter()
-        else:
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        if self.enable_json:
+            json_formatter = CustomJsonFormatter(
+                '%(timestamp)s %(level)s %(name)s %(message)s'
             )
-            
+        plain_formatter = logging.Formatter(self.log_format)
+        
+        # Console handler
+        if self.enable_console:
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(
+                json_formatter if self.enable_json else plain_formatter
+            )
+            logger.addHandler(console_handler)
+        
         # File handler
-        if self.log_dir:
-            # Create log directory if it doesn't exist
+        if self.enable_file:
+            # Create log directory
             self.log_dir.mkdir(parents=True, exist_ok=True)
             
-            # Create log file path
-            log_file = self.log_dir / f"{self.name}.log"
-            
-            # Create parent directory if it doesn't exist
-            log_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Create file handler
-            file_handler = logging.handlers.RotatingFileHandler(
-                str(log_file),  # Convert to string to avoid Path issues
-                maxBytes=self.max_size,
-                backupCount=self.backup_count,
-                encoding='utf-8'  # Explicitly set encoding
+            # Regular log file
+            file_handler = logging.handlers.TimedRotatingFileHandler(
+                self.log_dir / f"{self.name}.log",
+                when=self.log_rotation,
+                backupCount=self.log_retention
             )
-            file_handler.setFormatter(formatter)
-            self.logger.addHandler(file_handler)
+            file_handler.setFormatter(
+                json_formatter if self.enable_json else plain_formatter
+            )
+            logger.addHandler(file_handler)
             
-        # Console handler
-        if self.console_output:
-            console_handler = logging.StreamHandler(sys.stdout)
-            console_handler.setFormatter(formatter)
-            self.logger.addHandler(console_handler)
-            
+            # Error log file
+            error_handler = logging.handlers.TimedRotatingFileHandler(
+                self.log_dir / f"{self.name}.error.log",
+                when=self.log_rotation,
+                backupCount=self.log_retention
+            )
+            error_handler.setLevel(logging.ERROR)
+            error_handler.setFormatter(
+                json_formatter if self.enable_json else plain_formatter
+            )
+            logger.addHandler(error_handler)
+        
+        # Syslog handler
+        if self.enable_syslog and self.syslog_address:
+            syslog_handler = logging.handlers.SysLogHandler(
+                address=self.syslog_address
+            )
+            syslog_handler.setFormatter(
+                json_formatter if self.enable_json else plain_formatter
+            )
+            logger.addHandler(syslog_handler)
+        
+        # Configure structlog if enabled
+        if self.enable_structlog:
+            setup_structlog()
+        
+        return logger
+    
     def get_logger(self) -> logging.Logger:
-        """Get configured logger.
-        
-        Returns:
-            Configured logging.Logger instance
-        """
+        """Get the configured logger."""
         return self.logger
-        
-    def set_level(self, level: Union[str, int]) -> None:
-        """Set logging level.
-        
-        Args:
-            level: New logging level
-        """
-        self.logger.setLevel(level)
-        
-    def add_context(self, **kwargs: Any) -> None:
-        """Add context fields to all log messages.
-        
-        Args:
-            **kwargs: Context fields to add
-        """
-        old_factory = logging.getLogRecordFactory()
-        
-        def record_factory(*args: Any, **kwargs2: Any) -> logging.LogRecord:
-            record = old_factory(*args, **kwargs2)
-            record.extra_fields = kwargs
-            return record
+    
+    def set_level(self, level: str) -> None:
+        """Set the logging level."""
+        self.log_level = getattr(logging, level.upper())
+        self.logger.setLevel(self.log_level)
+    
+    def add_handler(self, handler: logging.Handler) -> None:
+        """Add a custom handler to the logger."""
+        if self.enable_json:
+            handler.setFormatter(CustomJsonFormatter(
+                '%(timestamp)s %(level)s %(name)s %(message)s'
+            ))
+        else:
+            handler.setFormatter(logging.Formatter(self.log_format))
+        self.logger.addHandler(handler)
+    
+    def remove_handler(self, handler: logging.Handler) -> None:
+        """Remove a handler from the logger."""
+        self.logger.removeHandler(handler)
+    
+    def cleanup_old_logs(self) -> None:
+        """Clean up old log files."""
+        if not self.enable_file:
+            return
             
-        logging.setLogRecordFactory(record_factory)
-        
+        try:
+            # Get all log files
+            log_files = list(self.log_dir.glob("*.log*"))
+            
+            # Get current time
+            now = datetime.utcnow()
+            
+            # Remove files older than retention period
+            for log_file in log_files:
+                if log_file.stat().st_mtime < (now - datetime.timedelta(days=self.log_retention)).timestamp():
+                    log_file.unlink()
+                    
+        except Exception as e:
+            self.logger.error(f"Error cleaning up logs: {e}")
+    
+    def rotate_logs(self) -> None:
+        """Force log rotation."""
+        if not self.enable_file:
+            return
+            
+        for handler in self.logger.handlers:
+            if isinstance(handler, logging.handlers.TimedRotatingFileHandler):
+                handler.doRollover()
+
 class StructuredLogger:
     """Logger that supports structured logging with context."""
     

@@ -4,7 +4,7 @@ import pytest
 import os
 import logging
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, Mock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from server.utils.base_server import BaseServer, limiter
@@ -204,3 +204,178 @@ def test_rate_limit_exceeded(client_rate_limit, test_base_server_rate_limit):
     # Make another request - should succeed now
     response = client_rate_limit.get("/api/v1/models", headers=headers)
     assert response.status_code == 200
+
+# --- BaseServer Middleware Tests ---
+
+def test_base_server_cors_enabled():
+    """Test CORS middleware is added when allowed_origins is set."""
+    # Mock a minimal ServerConfig needed for BaseServer init
+    mock_config = ServerConfig(
+        allowed_origins=["http://localhost:3000"], 
+        enable_compression=False,
+        enable_proxy=False, 
+        enable_auth=False, 
+        enable_rate_limiting=False,
+        enable_docs=False,
+        enable_health_checks=True,
+        log_level="INFO",
+        version="1.0",
+        enable_metrics=False,
+        enable_tracing=False
+    )
+    with patch('server.utils.config.ConfigManager.load_config', return_value=mock_config):
+        server = BaseServer("test_cors_enabled")
+        client = TestClient(server.app)
+        response = client.options(
+            "/health", 
+            headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET"}
+        )
+        assert response.status_code == 200
+        assert "access-control-allow-origin" in response.headers
+        assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+def test_base_server_cors_disabled():
+    """Test CORS middleware is NOT added when allowed_origins is empty."""
+    mock_config = ServerConfig(
+        allowed_origins=[], # Disabled
+        enable_compression=False,
+        enable_proxy=False, 
+        enable_auth=False, 
+        enable_rate_limiting=False,
+        enable_docs=False,
+        enable_health_checks=True,
+        log_level="INFO",
+        version="1.0",
+        enable_metrics=False,
+        enable_tracing=False
+    )
+    with patch('server.utils.config.ConfigManager.load_config', return_value=mock_config):
+        server = BaseServer("test_cors_disabled")
+        client = TestClient(server.app)
+        response = client.options(
+            "/health", 
+            headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET"}
+        )
+        # Without CORS middleware, OPTIONS might return 405 or not include headers
+        assert "access-control-allow-origin" not in response.headers
+
+def test_base_server_gzip_enabled():
+    """Test GZip middleware is added when enable_compression is True."""
+    mock_config = ServerConfig(
+        allowed_origins=[], 
+        enable_compression=True, # Enabled
+        compression_level=6, # Set a level
+        enable_proxy=False, 
+        enable_auth=False, 
+        enable_rate_limiting=False,
+        enable_docs=False,
+        enable_health_checks=True,
+        log_level="INFO",
+        version="1.0",
+        enable_metrics=False,
+        enable_tracing=False
+    )
+    with patch('server.utils.config.ConfigManager.load_config', return_value=mock_config):
+        server = BaseServer("test_gzip_enabled")
+        client = TestClient(server.app)
+        # Need a response large enough to trigger compression (default minimum_size=1000)
+        large_payload = {"data": "a" * 2000}
+        @server.app.get("/large")
+        async def large_endpoint():
+            return large_payload
+            
+        response = client.get("/large", headers={"Accept-Encoding": "gzip"})
+        assert response.status_code == 200
+        assert response.headers.get("content-encoding") == "gzip"
+
+@patch('server.utils.logging.LogManager.get_logger')
+def test_request_logging_middleware_info(mock_get_logger):
+    """Test RequestLoggingMiddleware logs INFO for successful requests."""
+    mock_logger = Mock(spec=logging.Logger)
+    mock_get_logger.return_value = mock_logger
+    
+    mock_config = ServerConfig(
+        allowed_origins=[], 
+        enable_compression=False,
+        enable_proxy=False, 
+        enable_auth=False, 
+        enable_rate_limiting=False,
+        enable_docs=False,
+        enable_health_checks=True,
+        log_level="INFO",
+        version="1.0",
+        enable_metrics=False,
+        enable_tracing=False
+    )
+    with patch('server.utils.config.ConfigManager.load_config', return_value=mock_config):
+        server = BaseServer("test_logging_info")
+        client = TestClient(server.app)
+        
+        response = client.get("/health")
+        assert response.status_code == 200
+        
+        mock_logger.info.assert_called_once()
+        args, kwargs = mock_logger.info.call_args
+        assert args[0].startswith("Request processed") # Check start of message
+        assert "extra" in kwargs
+        assert kwargs["extra"]["status_code"] == 200
+        assert kwargs["extra"]["method"] == "GET"
+        mock_logger.warning.assert_not_called()
+        mock_logger.error.assert_not_called()
+
+@patch('server.utils.logging.LogManager.get_logger')
+def test_request_logging_middleware_warning(mock_get_logger):
+    """Test RequestLoggingMiddleware logs WARNING for 4xx client errors."""
+    mock_logger = Mock(spec=logging.Logger)
+    mock_get_logger.return_value = mock_logger
+    
+    mock_config = ServerConfig(
+        allowed_origins=[], 
+        enable_compression=False,
+        enable_proxy=False, 
+        enable_auth=False, 
+        enable_rate_limiting=False,
+        enable_docs=False,
+        enable_health_checks=True,
+        log_level="INFO",
+        version="1.0",
+        enable_metrics=False,
+        enable_tracing=False
+    )
+    with patch('server.utils.config.ConfigManager.load_config', return_value=mock_config):
+        server = BaseServer("test_logging_warning")
+        client = TestClient(server.app)
+        
+        response = client.get("/not/a/real/path")
+        assert response.status_code == 404
+        
+        mock_logger.warning.assert_called_once()
+        args, kwargs = mock_logger.warning.call_args
+        assert args[0].startswith("Client error") # Check start of message
+        assert "extra" in kwargs
+        assert kwargs["extra"]["status_code"] == 404
+        mock_logger.info.assert_not_called()
+        mock_logger.error.assert_not_called()
+
+@patch('server.utils.logging.LogManager.get_logger')
+def test_request_logging_middleware_skip_sse(mock_get_logger, core_client):
+    """Test RequestLoggingMiddleware skips logging for /sse endpoint."""
+    # This test needs an app that actually has /sse endpoint, use core_client fixture
+    mock_logger = Mock(spec=logging.Logger)
+    # Find the logger attached to the core_client app state if possible, or mock globally
+    # For simplicity, we assume the global patch is sufficient here, but ideally,
+    # we'd verify the specific logger instance used by the middleware isn't called.
+    mock_get_logger.return_value = mock_logger
+
+    try:
+        # Make a request to the SSE endpoint using the core_client
+        # TestClient doesn't fully support SSE streams, but the middleware runs before the endpoint.
+        core_client.get("/sse")
+    except Exception:
+        # Ignore endpoint exceptions as we only care about middleware behavior
+        pass
+
+    # Verify logger was NOT called for the SSE request
+    mock_logger.info.assert_not_called()
+    mock_logger.warning.assert_not_called()
+    mock_logger.error.assert_not_called()

@@ -3,7 +3,7 @@ name = "python-server-mcp"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = "~=3.12"
 dependencies = [
     "mcp[cli]>=1.5.0",
     "opentelemetry-api>=1.31.1",
@@ -19,9 +19,20 @@ dependencies = [
     "pytest-cov>=4.1.0",
     "coverage",
     "pytest-mock>=3.11.1",
-    "pytest-anyio",
+    "pytest-asyncio",
     "fastapi>=0.115.12",
     "python-digitalocean>=1.17.0",
+    "itsdangerous>=2.0",
+    "slowapi>=0.1.9",
+    "structlog>=23.2.0",
+    "python-json-logger>=2.0.0",
+    "prometheus-client>=0.21.1",
+    "python-jose[cryptography]>=3.3.0",
+    "redis",
+    "loguru",
+    "dependency-injector",
+    "tiktoken",
+    "tree-sitter-languages>=1.10.2",
 ]
 
 [project.optional-dependencies]
@@ -29,8 +40,7 @@ llm = [
     "torch>=2.2.0",
     "transformers>=4.38.0",
     "accelerate>=0.27.0",
-    "bitsandbytes>=0.42.0",
-    "sentencepiece>=0.1.99",
+    # "sentencepiece=="0.1.99"", # Temporarily removed for manual install
     "protobuf",
     "anthropic>=0.18.0",
     "openai>=1.12.0",

@@ -14,33 +14,78 @@ import uuid
 from datetime import datetime
 import inspect
 from fastapi import HTTPException
+from enum import Enum
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
+class ErrorCode(Enum):
+    """Error codes for different types of errors."""
+    
+    # Server Errors (5xx)
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
+    GATEWAY_ERROR = "GATEWAY_ERROR"
+    
+    # Client Errors (4xx)
+    BAD_REQUEST = "BAD_REQUEST"
+    UNAUTHORIZED = "UNAUTHORIZED"
+    FORBIDDEN = "FORBIDDEN"
+    NOT_FOUND = "NOT_FOUND"
+    VALIDATION_ERROR = "VALIDATION_ERROR"
+    RATE_LIMITED = "RATE_LIMITED"
+    CONFLICT = "CONFLICT"
+    
+    # Resource Errors
+    RESOURCE_ERROR = "RESOURCE_ERROR"
+    MEMORY_ERROR = "MEMORY_ERROR"
+    DISK_ERROR = "DISK_ERROR"
+    CPU_ERROR = "CPU_ERROR"
+    
+    # Security Errors
+    SECURITY_ERROR = "SECURITY_ERROR"
+    API_KEY_ERROR = "API_KEY_ERROR"
+    TOKEN_ERROR = "TOKEN_ERROR"
+    
+    # Process Errors
+    PROCESS_ERROR = "PROCESS_ERROR"
+    TIMEOUT_ERROR = "TIMEOUT_ERROR"
+    COMMAND_ERROR = "COMMAND_ERROR"
+
 class MCPError(Exception):
-    """Base exception for MCP errors."""
+    """Base exception for all MCP errors."""
     
     def __init__(
         self,
         message: str,
+        code: ErrorCode,
         status_code: int = 500,
-        error_code: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None
     ):
-        self.message = message
-        self.status_code = status_code
-        self.error_code = error_code or "INTERNAL_ERROR"
-        self.details = details or {}
         super().__init__(message)
+        self.message = message
+        self.code = code
+        self.status_code = status_code
+        self.details = details or {}
+        
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert error to dictionary format."""
+        return {
+            "error": {
+                "code": self.code.value,
+                "message": self.message,
+                "status_code": self.status_code,
+                "details": self.details
+            }
+        }
 
 class ValidationError(MCPError):
     """Validation error."""
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(
             message=message,
+            code=ErrorCode.VALIDATION_ERROR,
             status_code=400,
-            error_code="VALIDATION_ERROR",
             details=details
         )
 
@@ -49,8 +94,8 @@ class AuthenticationError(MCPError):
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(
             message=message,
+            code=ErrorCode.UNAUTHORIZED,
             status_code=401,
-            error_code="AUTHENTICATION_ERROR",
             details=details
         )
 
@@ -59,8 +104,8 @@ class AuthorizationError(MCPError):
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(
             message=message,
+            code=ErrorCode.FORBIDDEN,
             status_code=403,
-            error_code="AUTHORIZATION_ERROR",
             details=details
         )
 
@@ -69,8 +114,8 @@ class NotFoundError(MCPError):
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(
             message=message,
+            code=ErrorCode.NOT_FOUND,
             status_code=404,
-            error_code="NOT_FOUND",
             details=details
         )
 
@@ -79,8 +124,8 @@ class ConflictError(MCPError):
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(
             message=message,
+            code=ErrorCode.CONFLICT,
             status_code=409,
-            error_code="CONFLICT",
             details=details
         )
 
@@ -89,104 +134,83 @@ class ConfigurationError(MCPError):
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(
             message=message,
+            code=ErrorCode.INTERNAL_ERROR,
             status_code=500, # Configuration issues are internal server errors
-            error_code="CONFIGURATION_ERROR",
             details=details
         )
 
 class SecurityError(MCPError):
-    """Security violation error."""
+    """Security-related error."""
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(
             message=message,
-            status_code=403, # Forbidden
-            error_code="SECURITY_VIOLATION",
+            code=ErrorCode.SECURITY_ERROR,
+            status_code=403,
             details=details
         )
 
 class ResourceError(MCPError):
-    """Raised when there's an issue with system resources."""
+    """Resource limit error."""
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, "RESOURCE_ERROR", details)
+        super().__init__(
+            message=message,
+            code=ErrorCode.RESOURCE_ERROR,
+            status_code=503,
+            details=details
+        )
 
 class ToolError(MCPError):
     """Raised when a tool operation fails."""
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, "TOOL_ERROR", details)
+        super().__init__(message, ErrorCode.INTERNAL_ERROR, 500, details)
 
-def format_error_response(error: Union[Exception, str], error_code: str = "UNKNOWN_ERROR") -> Dict[str, Any]:
+def format_error_response(error: Union[Exception, str], error_code: ErrorCode = ErrorCode.INTERNAL_ERROR) -> Dict[str, Any]:
     """Format an error into a standardized response dictionary."""
     if isinstance(error, MCPError):
         return {
             "status": "error",
-            "error_code": error.error_code,
+            "error_code": error.code.value,
             "error": error.message,
             "details": error.details
         }
     else:
         return {
             "status": "error",
-            "error_code": error_code,
+            "error_code": error_code.value,
             "error": str(error)
         }
 
-def handle_exceptions(error_code: str = "INTERNAL_ERROR", log_traceback: bool = True):
-    """Decorator for handling exceptions in route handlers or other functions."""
-    def decorator(func: Callable[..., Coroutine[Any, Any, Any]]) -> Callable[..., Coroutine[Any, Any, Any]]:
+def handle_exceptions(*error_classes: Type[Exception], error_code: ErrorCode = ErrorCode.INTERNAL_ERROR):
+    """Decorator for handling exceptions in route handlers."""
+    def decorator(func):
         @wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Assume request is the first argument if present and is a Request object
-            request: Request | None = None
-            if args and isinstance(args[0], Request):
-                request = args[0]
-
-            # Get logger from request state if available
-            logger_instance = getattr(request.state, 'log_manager', None) if request and hasattr(request, 'state') else None
-            if logger_instance is None or not hasattr(logger_instance, 'bind'):
-                print("Warning: Logger not found or invalid in request state for @handle_exceptions")
-                bound_logger = logging.getLogger("fallback_logger")
-            else:
-                request_id = getattr(request.state, 'request_id', 'N/A') if request and hasattr(request, 'state') else 'N/A'
-                try:
-                    bound_logger = logger_instance.bind(request_id=request_id, function_name=func.__name__)
-                except Exception as bind_error:
-                    print(f"Error binding logger context: {bind_error}")
-                    bound_logger = logger_instance
-
+        async def wrapper(*args, **kwargs):
             try:
-                # Directly call the function, letting FastAPI handle dependency injection
-                result = await func(*args, **kwargs)
-                return result
-            except HTTPException as e:
-                raise e
-            except MCPError as e:
-                log_method = getattr(bound_logger, 'error', print)
-                if log_traceback:
-                    # Wrap custom fields in 'extra' dictionary
-                    extra_data = {
-                        "error_code": e.error_code,
-                        "status_code": e.status_code,
-                        "details": e.details,
-                    }
-                    log_method(
-                        f"MCPError in {func.__name__}",
-                        extra=extra_data,
-                        exc_info=True
-                    )
-                raise e
+                # Await the result if the wrapped function is async
+                if asyncio.iscoroutinefunction(func):
+                    return await func(*args, **kwargs)
+                else:
+                    return func(*args, **kwargs)
             except Exception as e:
-                log_method = getattr(bound_logger, 'exception', print)
-                if log_traceback:
-                    log_method(f"Unexpected error in {func.__name__}")
-
-                # Create a generic MCPError for unhandled exceptions
+                if error_classes and not isinstance(e, error_classes):
+                    raise
+                
+                # Re-raise MCPError subclasses and FastAPI's HTTPException directly
+                if isinstance(e, MCPError) or isinstance(e, HTTPException):
+                    raise e # Let MCPError middleware or FastAPI handle these
+                    
+                # Convert other specified or unexpected exceptions to MCPError
+                logger.error(f"Unhandled exception in route handler '{func.__name__}': {e}", exc_info=True)
                 raise MCPError(
-                    message=f"An unexpected error occurred: {str(e)}",
+                    message=str(e),
+                    code=error_code,
                     status_code=500,
-                    error_code=error_code,
-                    details={"exception_type": type(e).__name__}
-                ) from e
-
+                    details={
+                        "type": type(e).__name__,
+                        # Optionally include traceback in details if needed for debugging
+                        # "traceback": traceback.format_exc()
+                    }
+                )
         return wrapper
     return decorator
 
@@ -240,69 +264,63 @@ def check_resource_limits(
         )
 
 class ErrorHandlerMiddleware(BaseHTTPMiddleware):
-    """Middleware for handling errors and adding request context."""
+    """Middleware for handling errors."""
     
-    def __init__(self, app, logger: logging.Logger):
+    def __init__(self, app, logger):
         super().__init__(app)
         self.logger = logger
         
-    async def dispatch(self, request: Request, call_next):
-        """Process request and handle errors."""
-        # Generate request ID
-        request_id = str(uuid.uuid4())
-        request.state.request_id = request_id
-        
-        # Add request context to logger
-        self.logger = self.logger.bind(
-            request_id=request_id,
-            method=request.method,
-            path=request.url.path,
-            client_ip=request.client.host if request.client else None
-        )
-        
+    async def dispatch(self, request: Request, call_next) -> Response:
+        """Handle errors in the request/response cycle."""
         try:
-            # Process request
-            response = await call_next(request)
-            return response
+            return await call_next(request)
             
         except MCPError as e:
-            # Handle known MCP errors
-            # Wrap custom fields in 'extra' dictionary for logging
-            extra_data = {
-                 "error_code": e.error_code,
-                 "status_code": e.status_code,
-                 "details": e.details,
-            }
-            self.logger.error(
-                "MCP error occurred",
-                extra=extra_data # Pass as extra
-            )
+            # Log error with appropriate level based on status code
+            if e.status_code >= 500:
+                self.logger.error(
+                    f"Server error: {str(e)}",
+                    extra={
+                        "error_code": e.code.value,
+                        "details": e.details,
+                        "traceback": traceback.format_exc()
+                    }
+                )
+            else:
+                self.logger.warning(
+                    f"Client error: {str(e)}",
+                    extra={
+                        "error_code": e.code.value,
+                        "details": e.details
+                    }
+                )
             
             return JSONResponse(
                 status_code=e.status_code,
-                content={
-                    "error": {
-                        "code": e.error_code,
-                        "message": e.message,
-                        "details": e.details,
-                        "request_id": request_id,
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
-                }
+                content=e.to_dict()
             )
             
         except Exception as e:
-            # Handle unexpected errors
-            self.logger.exception("Unexpected error occurred")
+            # Log unexpected errors
+            self.logger.error(
+                f"Unexpected error: {str(e)}",
+                extra={
+                    "error_code": ErrorCode.INTERNAL_ERROR.value,
+                    "traceback": traceback.format_exc()
+                }
+            )
             
             return JSONResponse(
                 status_code=500,
                 content={
                     "error": {
-                        "code": "INTERNAL_ERROR",
+                        "code": ErrorCode.INTERNAL_ERROR.value,
                         "message": "An unexpected error occurred",
-                        "request_id": request_id,
-                        "timestamp": datetime.utcnow().isoformat()
+                        "status_code": 500,
+                        "details": {
+                            "type": type(e).__name__,
+                            "message": str(e)
+                        }
                     }
                 }
             ) 

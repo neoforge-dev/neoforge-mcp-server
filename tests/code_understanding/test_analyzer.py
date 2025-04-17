@@ -69,10 +69,10 @@ def test_analyze_code(analyzer, sample_code):
     
     # Verify imports
     assert len(result['imports']) == 2
-    # Check 'import os'
-    assert any(imp.get('module') == 'os' and imp.get('symbol') is None for imp in result['imports'])
-    # Check 'from sys import path'
-    assert any(imp.get('module') == 'sys' and imp.get('symbol') == 'path' for imp in result['imports'])
+    assert result['imports'][0]['module'] == 'os'
+    assert result['imports'][0]['type'] == 'import'
+    # Check the from_import
+    assert any(imp.get('module') == 'sys' and imp.get('name') == 'path' for imp in result['imports'])
     
     # Verify functions (top-level only)
     assert len(result['functions']) == 2 # Should only find 'hello' and 'main'
@@ -153,16 +153,16 @@ def test_analyze_directory(analyzer, tmp_path):
     # Verify module2 results
     assert len(module2_result['imports']) == 1
     # Check 'from module1 import func1'
-    assert module2_result['imports'][0].get('symbol') == 'func1' 
     assert module2_result['imports'][0].get('module') == 'module1'
+    assert module2_result['imports'][0].get('name') == 'func1'
     assert len(module2_result['functions']) == 1
     assert module2_result['functions'][0]['name'] == 'func2'
     
     # Verify module3 results
     assert len(module3_result['imports']) == 1
     # Check 'from ..module2 import func2'
-    assert module3_result['imports'][0].get('symbol') == 'func2' 
     assert module3_result['imports'][0].get('module') == '..module2'
+    assert module3_result['imports'][0].get('name') == 'func2'
     assert len(module3_result['functions']) == 1
     assert module3_result['functions'][0]['name'] == 'func3'
 

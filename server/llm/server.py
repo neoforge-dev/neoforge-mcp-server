@@ -55,21 +55,34 @@ class GenerateResponse(BaseModel):
     tokens_generated: int
 
 class LLMServer(BaseServer):
-    """LLM Server implementation inheriting from BaseServer."""
+    """LLM MCP Server implementation."""
 
     def __init__(self):
-        """Initialize LLM Server."""
-        super().__init__(app_name="llm_server")
-        self.model_manager = ModelManager(config=self.config)
-        self.logger.info("LLM Server initialized with Model Manager")
+        """Initialize LLM MCP Server (Managers only)."""
+        super().__init__("llm_mcp")
+        self._init_llm_manager()
 
-    def register_routes(self) -> None:
-        """Register LLM specific routes after base routes."""
-        super().register_routes()
+    def _init_llm_manager(self) -> None:
+        """Initialize the language model manager."""
+        try:
+            # Pass the config object to ModelManager
+            self.model_manager = ModelManager(config=self.config)
+            self.logger.info("ModelManager initialized successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize ModelManager: {e}", exc_info=True)
+            # Decide if this is fatal. If so, raise an exception.
+            # For now, let it continue but log the error.
+            self.model_manager = None # Ensure it's None if failed
 
-        @self.app.get("/api/v1/models", response_model=ListModelsResponse, tags=["LLM"])
+    def register_routes(self, app: FastAPI) -> None:
+        """Register LLM specific API routes."""
+        super().register_routes(app)
+
+        prefix = self.config.api_prefix
+
+        @app.get(f"{prefix}/models", tags=["LLM"], response_model=ListModelsResponse)
         @handle_exceptions()
-        async def list_llm_models(
+        async def list_models(
             request: Request,
             api_key: ApiKey = Depends(self.get_api_key)
         ) -> ListModelsResponse:
@@ -77,11 +90,14 @@ class LLMServer(BaseServer):
             logger = request.state.log_manager
             logger.info("Received request to list models")
 
-            if not self.security.check_permission(api_key, "llm:list_models"):
+            if not self.security.check_permission(api_key, "llm:read"):
                 raise AuthorizationError(
                     message="Insufficient permissions to list models",
-                    details={"required_permission": "llm:list_models"}
+                    details={"required_permission": "llm:read"}
                 )
+
+            if not self.model_manager:
+                raise HTTPException(status_code=503, detail="Model manager not available")
 
             try:
                 available_models = self.model_manager.list_models()
@@ -101,7 +117,7 @@ class LLMServer(BaseServer):
                  logger.exception("Error processing models in list_models route")
                  raise
 
-        @self.app.post("/api/v1/tokenize", response_model=TokenizeResponse, tags=["LLM"])
+        @app.post(f"{prefix}/tokenize", tags=["LLM"], response_model=TokenizeResponse)
         @handle_exceptions()
         async def tokenize(
             request: Request,
@@ -119,43 +135,22 @@ class LLMServer(BaseServer):
                     details={"required_permission": "llm:tokenize"}
                 )
 
+            if not self.model_manager:
+                raise HTTPException(status_code=503, detail="Model manager not available")
+
             try:
-                # Wrap get_model call to handle potential ValueError
-                try:
-                    model = self.model_manager.get_model(requested_model_name)
-                except ValueError as e:
-                    # Reraise ValueError as NotFoundError for proper HTTP response
-                    raise NotFoundError(
-                        message=f"Model not found: {requested_model_name or 'default'}",
-                        details={"model_name": requested_model_name or 'default', "original_error": str(e)}
-                    )
-
-                if not model: # Should technically be unreachable if get_model raises ValueError
-                    if requested_model_name is None:
-                         raise ConfigurationError(
-                             message="Tokenization requested with default model, but no default model is configured.",
-                             details={"model_name": None}
-                         )
-                    else:
-                        # This case might still be relevant if get_model returns None instead of raising error
-                        raise NotFoundError(
-                            message=f"Model not found: {requested_model_name}",
-                            details={"model_name": requested_model_name}
-                        )
-
-                tokens = model.tokenizer.encode(tokenize_request.text)
-                actual_model_name = model.name
-                return TokenizeResponse(
-                    tokens=tokens,
-                    count=len(tokens),
-                    model_name=actual_model_name
+                result = self.model_manager.tokenize(
+                    text=tokenize_request.text,
+                    model_id=tokenize_request.model_name
                 )
-
+                return TokenizeResponse(**result)
+            except ConfigurationError as e:
+                raise HTTPException(status_code=404, detail=str(e))
             except Exception as e:
-                logger.error(f"Error during tokenization: {str(e)}")
-                raise # Re-raise other exceptions (like AuthorizationError or unexpected ones)
+                logger.error(f"Tokenization error: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail="Tokenization failed")
 
-        @self.app.post("/api/v1/generate", response_model=GenerateResponse, tags=["LLM"])
+        @app.post(f"{prefix}/generate", tags=["LLM"], response_model=GenerateResponse)
         @handle_exceptions()
         async def generate(
             request: Request,
@@ -172,50 +167,27 @@ class LLMServer(BaseServer):
                     details={"required_permission": "llm:generate"}
                 )
 
+            if not self.model_manager:
+                raise HTTPException(status_code=503, detail="Model manager not available")
+
             try:
-                # Wrap get_model call to handle potential ValueError
-                try:
-                    model = self.model_manager.get_model(generate_request.model_name)
-                except ValueError as e:
-                    # Reraise ValueError as NotFoundError for proper HTTP response
-                    raise NotFoundError(
-                        message=f"Model not found: {generate_request.model_name or 'default'}",
-                        details={"model_name": generate_request.model_name or 'default', "original_error": str(e)}
-                    )
-                except ConfigurationError as e:
-                    # Re-raise ConfigurationError with the original message
-                    raise
+                # Convert Pydantic model to dict for generate method if needed
+                # Or update generate method to accept the Pydantic model directly
+                generation_params = generate_request.model_dump(
+                    exclude_none=True, exclude={'model', 'prompt'}
+                )
 
-                if not model: # Should technically be unreachable now
-                    raise NotFoundError( # Keep as fallback just in case get_model returns None
-                        message=f"Model not found: {generate_request.model_name or 'default'}",
-                        details={"model_name": generate_request.model_name or 'default'}
-                    )
-
-                actual_model_name = model.name # Get the actual model name used
-
-                # Pass only valid parameters to generate
-                generation_params = {}
-                if generate_request.max_tokens is not None:
-                    generation_params["max_tokens"] = generate_request.max_tokens
-                if generate_request.temperature is not None:
-                    generation_params["temperature"] = generate_request.temperature
-
-                generated_text = model.generate(
-                    generate_request.prompt,
+                result = await self.model_manager.generate(
+                    prompt=generate_request.prompt,
+                    model_id=generate_request.model_name,
                     **generation_params
                 )
-
-                tokens = model.tokenizer.encode(generated_text)
-                return GenerateResponse(
-                    text=generated_text,
-                    model_name=actual_model_name,
-                    tokens_generated=len(tokens)
-                )
-
+                return GenerateResponse(**result)
+            except ConfigurationError as e:
+                raise HTTPException(status_code=404, detail=str(e))
             except Exception as e:
-                logger.error(f"Error during text generation: {str(e)}")
-                raise
+                logger.error(f"Generation error: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail="Generation failed")
 
 def create_app() -> FastAPI:
     """Factory function to create the LLMServer FastAPI app."""

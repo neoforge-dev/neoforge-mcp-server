@@ -1,15 +1,4 @@
-.PHONY: test test-cov test-file clean setup run-servers help docker-up docker-down docker-build lint format check-types
-
-# Variables
-PYTHON = python3
-PIP = pip3
-VENV = .venv
-PYTEST = pytest
-COVERAGE = coverage
-DOCKER_COMPOSE = docker-compose
-PYLINT = pylint
-BLACK = black
-MYPY = mypy
+.PHONY: test test-cov test-file clean setup run-servers help docker-up docker-down docker-build lint format check-types docker-build-llm docker-run-llm docker-stop-llm test-core test-llm test-neod test-neoo test-neodo test-neolocal test-neollm test-all
 
 # Default target
 help:
@@ -23,42 +12,54 @@ help:
 	@echo "  make docker-up    - Start Docker services"
 	@echo "  make docker-down  - Stop Docker services"
 	@echo "  make docker-build - Build Docker services"
-	@echo "  make lint         - Run pylint on the codebase"
-	@echo "  make format       - Format code with black"
+	@echo "  make docker-build-llm - Build LLM server Docker image"
+	@echo "  make docker-run-llm  - Run LLM server Docker container"
+	@echo "  make docker-stop-llm - Stop LLM server Docker container"
+	@echo "  make lint         - Run ruff linting on the codebase"
+	@echo "  make format       - Format code with ruff"
 	@echo "  make check-types  - Run mypy type checking"
+	@echo "  make test-core    - Run tests for the Core MCP server"
+	@echo "  make test-llm     - Run tests for the LLM MCP server"
+	@echo "  make test-neod    - Run tests for the NeoD MCP server"
+	@echo "  make test-neoo    - Run tests for the NeoOps MCP server"
+	@echo "  make test-neodo   - Run tests for the NeoDO MCP server"
+	@echo "  make test-neolocal - Run tests for the NeoLocal MCP server"
+	@echo "  make test-neollm  - Run tests for the NeoLLM MCP server"
+	@echo "  make test-all     - Run all server tests"
 	@echo "  make help         - Show this help message"
 
 # Set up development environment
 setup: clean
-	$(PYTHON) -m venv $(VENV)
-	. $(VENV)/bin/activate && $(PIP) install -r requirements.txt
-	. $(VENV)/bin/activate && $(PIP) install -r requirements-dev.txt
+	CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5" uv sync --all-extras # Include optional dependencies for tests
+	# uv pip install "itsdangerous>=2.0" -- Removed workaround
+	# uv pip install "slowapi>=0.1.9" -- Removed workaround
+	# uv pip install "structlog>=23.2.0" -- Removed workaround
 
 # Run all tests
 test: setup
-	. $(VENV)/bin/activate && $(PYTEST) -v
+	uv run pytest -v --log-cli-level=DEBUG
 
 # Run tests with coverage
 test-cov: setup
-	. $(VENV)/bin/activate && $(PYTEST) --cov=server --cov-report=html
+	uv run pytest --cov=server --cov-report=html
 
 # Run specific test file
 test-file: setup
-	. $(VENV)/bin/activate && $(PYTEST) -v $(FILE)
+	uv run pytest -v $(FILE)
 
 # Run all servers
 run-servers: setup
-	. $(VENV)/bin/activate && $(PYTHON) run_servers.py
+	uv run python3 run_servers.py
 
 # Docker commands
 docker-up:
-	$(DOCKER_COMPOSE) up -d
+	docker-compose up -d
 
 docker-down:
-	$(DOCKER_COMPOSE) down
+	docker-compose down
 
 docker-build:
-	$(DOCKER_COMPOSE) build
+	docker-compose build
 
 # --- LLM Server Docker Commands ---
 # Define image name and tag
@@ -71,15 +72,7 @@ docker-build-llm:
 
 docker-run-llm: docker-build-llm
 	@echo "Running LLM server Docker container ($(LLM_IMAGE_NAME):$(LLM_IMAGE_TAG))..."
-	# Run in detached mode (-d), remove container on exit (--rm)
-	# Map host port 7444 to container port 7444
-	# Pass necessary environment variables (e.g., API keys) using -e
-	# Mount volumes if needed (e.g., for local models) using -v
 	docker run -d --rm -p 7444:7444 \
-		# Example: Pass OpenAI API key if needed by the container
-		# -e OPENAI_API_KEY=$(OPENAI_API_KEY) \
-		# Example: Mount a local models directory if needed
-		# -v $(HOME)/.cache/huggingface:/root/.cache/huggingface \
 		--name $(LLM_IMAGE_NAME) $(LLM_IMAGE_NAME):$(LLM_IMAGE_TAG)
 
 docker-stop-llm:
@@ -90,30 +83,42 @@ docker-stop-llm:
 
 # Code quality commands
 lint: setup
-	. $(VENV)/bin/activate && $(PYLINT) server tests
+	uv run ruff check server tests
 
 format: setup
-	. $(VENV)/bin/activate && $(BLACK) server tests
+	uv run ruff format server tests
 
 check-types: setup
-	. $(VENV)/bin/activate && $(MYPY) server tests
+	uv run mypy server tests
 
 # Clean up generated files
 clean:
-	rm -rf __pycache__
-	rm -rf .pytest_cache
-	rm -rf .coverage
-	rm -rf htmlcov
-	rm -rf *.egg-info
-	rm -rf build
-	rm -rf dist
-	find . -type d -name "__pycache__" -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
-	find . -type f -name "*.pyo" -delete
-	find . -type f -name "*.pyd" -delete
-	find . -type f -name ".coverage" -delete
-	find . -type d -name "*.egg-info" -exec rm -rf {} +
-	find . -type d -name "*.egg" -exec rm -rf {} +
+	uv clean
+
+# Per-server test targets
+test-core:
+	uv run pytest -v tests/core --log-cli-level=DEBUG
+
+test-llm:
+	uv run pytest -v tests/llm --log-cli-level=DEBUG
+
+test-neod:
+	uv run pytest -v tests/neod --log-cli-level=DEBUG
+
+test-neoo:
+	uv run pytest -v tests/neoo --log-cli-level=DEBUG
+
+test-neodo:
+	uv run pytest -v tests/neodo --log-cli-level=DEBUG
+
+test-neolocal:
+	uv run pytest -v tests/neolocal --log-cli-level=DEBUG
+
+test-neollm:
+	uv run pytest -v tests/test_neollm.py --log-cli-level=DEBUG
+
+test-all:
+	uv run pytest -v tests --log-cli-level=DEBUG
 
 # Default target
-.DEFAULT_GOAL := help 
+.DEFAULT_GOAL := help

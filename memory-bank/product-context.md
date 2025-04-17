@@ -1,21 +1,23 @@
-# Product Context
+# Product Context: MCP Platform
 
-## Purpose & Goals
-- **System:** AI-enhanced dev/ops platform.
+## Purpose
+- AI-enhanced dev/ops platform.
 - **Focus:** SoC, scalability, security, monitoring.
-- **Goals:** <100ms resp, 99.9% uptime, no critical vulns, >90% test coverage.
+
+## Key Goals (Metrics)
+- **Performance:** <100ms response time
+- **Reliability:** 99.9% uptime
+- **Security:** Zero critical vulnerabilities
+- **Quality:** >90% test coverage
 
 ## Server Roles (Ports)
-- Core (7443): Coordination, Tool Mgmt
-- LLM (7444): Model Ops, Code Gen
-- NeoDev (7445): Dev Tools
-- NeoOps (7446): Process/Resource
-- NeoLocal (7447): Local Ops
-- NeoLLM (7448): Local Models
-- NeoDO (7449): Direct Exec
+- **Core (7443):** Orchestration, Tooling
+- **LLM (7444):** Model Mgmt, Generation
+- **NeoDev (7445):** Dev Tools
+- **NeoOps (7446):** Process Mgmt, Resource Mgmt
+- **NeoLocal (7447):** Local Operations
+- **NeoLLM (7448):** Local Model Serving
+- **NeoDO (7449):** Direct Execution Layer
 
 ## Basic Flow
-- Request -> Validate/Auth -> Process -> Response -> Monitor
-
-## Future
-- Scaling, Features, Integrations, UX. 
+- Request -> Auth -> Process -> Response -> Monitor 

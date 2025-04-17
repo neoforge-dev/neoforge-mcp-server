@@ -25,8 +25,16 @@ import threading
 session_lock = threading.Lock()
 active_sessions = {}
 
+# DO NOT import app directly - this causes it to be initialized
+# when this module is imported, which breaks tests
+def get_app():
+    """Get the initialized app, importing it only when needed."""
+    from .main import app
+    return app
+
 __all__ = [
     "create_app",
+    "get_app",
     # Security functions/vars
     "is_command_safe",
     "block_command",

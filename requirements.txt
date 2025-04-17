@@ -10,6 +10,8 @@ click>=8.1.0
 requests>=2.31.0
 rich>=13.7.0
 loguru>=0.7.0
+structlog>=23.2.0
+# tiktoken # Moved to pyproject.toml
 
 # OpenTelemetry dependencies
 opentelemetry-api>=1.21.0
@@ -23,7 +25,9 @@ opentelemetry-instrumentation-fastapi>=0.52b1
 bandit>=1.7.8
 ruff>=0.3.0
 PyYAML>=6.0.1
-tree-sitter>=0.20.1
+# Pin tree-sitter version to avoid potential API mismatches with tree-sitter-languages
+#tree-sitter>=0.20.1
+tree-sitter==0.21.3
 prometheus-client>=0.21.1
 psutil>=5.9.0
 
@@ -45,6 +49,16 @@ aiohttp>=3.8.0
 python-json-logger>=2.0.0
 python-digitalocean>=1.17.0
 slowapi>=0.1.9
+itsdangerous>=2.0
 
 # Monitoring and load testing
-locust>=2.33.2 
+locust>=2.33.2
+
+# Added missing dependency
+# dependency-injector # Moved to pyproject.toml
+redis
+
+# Add development/testing dependencies below if needed, or in requirements-dev.txt 
+
+# Add the pre-built languages package
+tree-sitter-languages 

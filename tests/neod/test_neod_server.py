@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 import logging
 import time
+from datetime import datetime
 
 # Assuming config structure is similar to BaseServer test
 from server.utils.config import ServerConfig
@@ -58,10 +59,12 @@ def test_neod_server(mock_neod_config):
         # Add basic mock ApiKey for dependency injection
         mock_api_key_obj = ApiKey(
             key_id="neod-test-id",
-            key_hash="neod-test-hash",
+            hashed_key="neod-test-hash",
             name="neod-test-key",
-            created_at=time.time(),
-            scopes=set(["neod:*", "code_understanding:*"]) # Example scopes
+            roles=["neod:*", "code_understanding:*"],
+            rate_limit="100/minute",
+            created_at=datetime.utcnow(),
+            is_active=True
         )
         mock_security_instance.validate_api_key.return_value = mock_api_key_obj
         mock_security_instance.check_permission.return_value = True # Default to True

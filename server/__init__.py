@@ -8,10 +8,13 @@ Main package for the MCP server application.
 __version__ = "0.1.0"
 
 # Core server components (use factory)
-from .core import create_app
+from .core import create_app, get_app
 
-# Create the main application instance using the core factory
-app = create_app()
+# DO NOT auto-initialize the app here - this breaks tests
+# Use get_app() to get the app instance when needed
+def get_application():
+    """Get the application instance, initializing it only when needed."""
+    return get_app()
 
 # Utils (Import specific necessary utils if needed, or rely on sub-package access)
 # Example: from .utils.error_handling import SecurityError
@@ -33,6 +36,15 @@ from .core import (
     DEFAULT_BLACKLIST # The default set from security.py
 )
 
+# System utility functions
+from .utils.system_utilities import (
+    system_info,
+    calculate,
+    edit_block,
+    list_processes,
+    kill_process
+)
+
 # LLM Server (if needed directly)
 # from .llm import server as llm_server
 
@@ -45,7 +57,8 @@ from .core import (
 
 __all__ = [
     # Core Server App
-    "app", # Export only the created app instance
+    "get_application", # Export the function to get the app, not the app itself
+    "create_app",  # Export the factory function
     
     # Command Execution
     "execute_command",
@@ -59,6 +72,13 @@ __all__ = [
     "unblock_command",
     "blacklisted_commands",
     "DEFAULT_BLACKLIST",
+    
+    # System Utilities
+    "system_info",
+    "calculate",
+    "edit_block",
+    "list_processes",
+    "kill_process",
     
     # Sub-servers (uncomment if needed)
     # "llm_server",

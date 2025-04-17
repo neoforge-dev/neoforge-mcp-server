@@ -15,9 +15,18 @@ from opentelemetry.semconv.resource import ResourceAttributes
 from functools import wraps
 import re
 import sys
+from fastapi import FastAPI
+from decorators import trace_tool, metrics_tool
 
 # Initialize the MCP server
 mcp = FastMCP("LLM Tools MCP", port=7444, log_level="DEBUG")
+
+# Create FastAPI app
+app = FastAPI() # Add this line to define the app
+
+# Mount app if not testing
+if "pytest" not in sys.modules:
+    mcp.mount_app(app)
 
 # Initialize tracer
 resource = Resource(attributes={
@@ -59,6 +68,7 @@ def trace_tool(func):
 
 @mcp.tool()
 @trace_tool
+@metrics_tool
 def generate_code(prompt: str, model: str = "claude-3-sonnet", context: Optional[Dict[str, Any]] = None, system_prompt: Optional[str] = None) -> Dict[str, Any]:
     """Generate code using various models."""
     try:
@@ -68,20 +78,20 @@ def generate_code(prompt: str, model: str = "claude-3-sonnet", context: Optional
                 "error": "Empty prompt provided",
                 "language": "python"
             }
-        
+
         # Get workspace info
         workspace_info = _get_workspace_info()
-        
+
         # Prepare context
         full_context = {
             "workspace": workspace_info,
             **(context or {})
         }
-        
+
         # Get system prompt
         if system_prompt is None:
             system_prompt = _get_default_system_prompt("python")
-        
+
         # Generate code based on model type
         if model in ["claude-3-sonnet", "claude-3-opus"]:
             result = _generate_with_api_model(
@@ -113,7 +123,7 @@ def generate_code(prompt: str, model: str = "claude-3-sonnet", context: Optional
                 "error": f"Invalid model: {model}",
                 "language": "python"
             }
-        
+
         return {
             "status": "success",
             "code": result,
@@ -130,6 +140,7 @@ def generate_code(prompt: str, model: str = "claude-3-sonnet", context: Optional
 
 @mcp.tool()
 @trace_tool
+@metrics_tool
 def manage_llm_context(content: str, model: str = "claude-3-sonnet", max_tokens: int = None) -> Dict[str, Any]:
     """Advanced LLM context management and optimization."""
     try:
@@ -140,24 +151,24 @@ def manage_llm_context(content: str, model: str = "claude-3-sonnet", max_tokens:
             'gpt-4': 128000,
             'gpt-3.5': 16000
         }
-        
+
         if model not in model_limits:
             return {
                 'status': 'error',
                 'error': f'Unknown model: {model}'
             }
-        
+
         # Use specified max_tokens or model limit
         token_limit = max_tokens or model_limits[model]
-        
+
         # Analyze content
         words = content.split()
         chars = len(content)
         lines = content.count('\n') + 1
-        
+
         # Estimate tokens (improved estimation)
         estimated_tokens = int(len(words) * 1.3)  # Rough approximation
-        
+
         # Calculate context metrics
         metrics = {
             'estimated_tokens': estimated_tokens,
@@ -166,7 +177,7 @@ def manage_llm_context(content: str, model: str = "claude-3-sonnet", max_tokens:
             'lines': lines,
             'usage_percent': (estimated_tokens / token_limit) * 100
         }
-        
+
         # Generate optimization suggestions
         suggestions = []
         if estimated_tokens > token_limit:
@@ -174,26 +185,26 @@ def manage_llm_context(content: str, model: str = "claude-3-sonnet", max_tokens:
                 'type': 'truncation',
                 'message': f'Content exceeds {model} token limit by approximately {estimated_tokens - token_limit} tokens'
             })
-            
+
             # Suggest specific optimizations
             if lines > 100:
                 suggestions.append({
                     'type': 'structure',
                     'message': 'Consider reducing line count by combining related lines'
                 })
-            
+
             code_blocks = len(re.findall(r'```.*?```', content, re.DOTALL))
             if code_blocks > 5:
                 suggestions.append({
                     'type': 'code',
                     'message': 'Consider reducing number of code blocks or showing only relevant portions'
                 })
-        
+
         # Optimize content if needed
         optimized_content = content
         if estimated_tokens > token_limit:
             optimized_content = _optimize_content(content, token_limit)
-        
+
         return {
             'status': 'success',
             'metrics': metrics,
@@ -210,6 +221,7 @@ def manage_llm_context(content: str, model: str = "claude-3-sonnet", max_tokens:
 
 @mcp.tool()
 @trace_tool
+@metrics_tool
 def context_length(text: str) -> Dict[str, Any]:
     """Track LLM context usage."""
     try:
@@ -217,10 +229,10 @@ def context_length(text: str) -> Dict[str, Any]:
         words = text.split()
         characters = len(text)
         lines = text.count('\n') + 1
-        
+
         # Rough token estimation (OpenAI GPT-style)
         estimated_tokens = len(words) * 1.3
-        
+
         # Context length limits (example values)
         limits = {
             'claude-3-opus': 200000,
@@ -228,10 +240,10 @@ def context_length(text: str) -> Dict[str, Any]:
             'gpt-4': 128000,
             'gpt-3.5': 16000
         }
-        
+
         # Calculate percentage of context used
         usage = {model: (estimated_tokens / limit) * 100 for model, limit in limits.items()}
-        
+
         return {
             'estimated_tokens': int(estimated_tokens),
             'words': len(words),
@@ -248,31 +260,32 @@ def context_length(text: str) -> Dict[str, Any]:
 
 @mcp.tool()
 @trace_tool
+@metrics_tool
 def filter_output(content: str, max_lines: int = 50, important_patterns: List[str] = None) -> Dict[str, Any]:
     """Process and format long command outputs for better LLM consumption."""
     try:
         lines = content.split('\n')
         total_lines = len(lines)
-        
+
         if not important_patterns:
             important_patterns = [
                 r'error', r'warning', r'fail', r'exception',
                 r'success', r'completed', r'starting', r'finished'
             ]
-        
+
         # Always keep lines matching important patterns
         important_lines = []
         other_lines = []
-        
+
         for line in lines:
             if any(re.search(pattern, line, re.IGNORECASE) for pattern in important_patterns):
                 important_lines.append(line)
             else:
                 other_lines.append(line)
-        
+
         # Calculate remaining space for other lines
         remaining_space = max_lines - len(important_lines)
-        
+
         if remaining_space <= 0:
             filtered_lines = important_lines[:max_lines]
         else:
@@ -280,7 +293,7 @@ def filter_output(content: str, max_lines: int = 50, important_patterns: List[st
             step = len(other_lines) // remaining_space if remaining_space > 0 else 1
             sampled_lines = other_lines[::step][:remaining_space]
             filtered_lines = important_lines + sampled_lines
-        
+
         return {
             'filtered_content': '\n'.join(filtered_lines),
             'total_lines': total_lines,
@@ -346,7 +359,7 @@ def _generate_with_local_model(prompt: str, model: str, system_prompt: str, max_
         model=config["model_name"],
         device=config["device"]
     )
-    
+
     full_prompt = f"{system_prompt}\n\n{prompt}"
     response = pipe(
         full_prompt,
@@ -354,7 +367,7 @@ def _generate_with_local_model(prompt: str, model: str, system_prompt: str, max_
         temperature=temperature,
         do_sample=True
     )
-    
+
     return response[0]["generated_text"]
 
 def _get_local_model_config(model: str) -> Dict[str, Any]:
@@ -369,10 +382,10 @@ def _get_local_model_config(model: str) -> Dict[str, Any]:
             "device": "cuda" if torch.cuda.is_available() else "cpu"
         }
     }
-    
+
     if model not in configs:
         raise ValueError(f"Unknown model: {model}")
-    
+
     return configs[model]
 
 def _optimize_content(content: str, token_limit: int) -> str:
@@ -380,32 +393,32 @@ def _optimize_content(content: str, token_limit: int) -> str:
     # Simple optimization: truncate content while preserving important parts
     words = content.split()
     estimated_tokens = len(words) * 1.3
-    
+
     if estimated_tokens <= token_limit:
         return content
-    
+
     # Keep important parts (error messages, warnings, etc.)
     important_patterns = [
         r'error', r'warning', r'fail', r'exception',
         r'success', r'completed', r'starting', r'finished'
     ]
-    
+
     lines = content.split('\n')
     important_lines = []
     other_lines = []
-    
+
     for line in lines:
         if any(re.search(pattern, line, re.IGNORECASE) for pattern in important_patterns):
             important_lines.append(line)
         else:
             other_lines.append(line)
-    
+
     # Calculate how many other lines we can keep
     important_tokens = sum(len(line.split()) * 1.3 for line in important_lines)
     remaining_tokens = token_limit - important_tokens
     other_tokens_per_line = sum(len(line.split()) * 1.3 for line in other_lines) / len(other_lines)
     max_other_lines = int(remaining_tokens / other_tokens_per_line)
-    
+
     # Select a representative sample of other lines
     if max_other_lines > 0:
         step = len(other_lines) // max_other_lines if max_other_lines > 0 else 1
@@ -436,4 +449,7 @@ def _get_environment_info() -> Dict[str, str]:
         "python_version": sys.version,
         "platform": sys.platform,
         "cuda_available": torch.cuda.is_available() if torch else False
-    } 
+    }
+
+# Add FastAPI app import if not already present
+from fastapi import FastAPI 

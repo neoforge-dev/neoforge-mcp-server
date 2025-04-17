@@ -8,7 +8,7 @@ import yaml
 from pathlib import Path
 from typing import Any, Dict, Optional, Union, List, Set
 from dataclasses import dataclass, field
-from .error_handling import MCPError
+from .error_handling import MCPError, ErrorCode
 
 @dataclass
 class ServerConfig:
@@ -140,6 +140,8 @@ class ServerConfig:
         enable_system_commands: bool = False,
         enable_network_operations: bool = False,
         enable_backup_operations: bool = False,
+        # API routing
+        api_prefix: str = "/api/v1",
     ):
         """Initialize server configuration."""
         self.name = name
@@ -293,6 +295,7 @@ class ServerConfig:
         self.enable_system_commands = enable_system_commands
         self.enable_network_operations = enable_network_operations
         self.enable_backup_operations = enable_backup_operations
+        self.api_prefix = api_prefix
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
@@ -327,7 +330,7 @@ class ConfigManager:
         except Exception as e:
             raise MCPError(
                 f"Failed to load config file: {path}",
-                error_code="CONFIG_ERROR",
+                code=ErrorCode.INTERNAL_ERROR,
                 details={"error": str(e)}
             )
             
@@ -339,7 +342,7 @@ class ConfigManager:
         except Exception as e:
             raise MCPError(
                 f"Failed to load config file: {path}",
-                error_code="CONFIG_ERROR",
+                code=ErrorCode.INTERNAL_ERROR,
                 details={"error": str(e)}
             )
             
@@ -391,7 +394,7 @@ class ConfigManager:
         if missing:
             raise MCPError(
                 "Missing required config fields",
-                error_code="CONFIG_ERROR",
+                code=ErrorCode.INTERNAL_ERROR,
                 details={"missing_fields": list(missing)}
             )
             
@@ -399,7 +402,7 @@ class ConfigManager:
         if not 1024 <= config['port'] <= 65535:
             raise MCPError(
                 "Invalid port number",
-                error_code="CONFIG_ERROR",
+                code=ErrorCode.INTERNAL_ERROR,
                 details={"port": config['port']}
             )
             
@@ -408,7 +411,7 @@ class ConfigManager:
             if key in config and not 0 <= config[key] <= 100:
                 raise MCPError(
                     f"Invalid percentage value for {key}",
-                    error_code="CONFIG_ERROR",
+                    code=ErrorCode.INTERNAL_ERROR,
                     details={key: config[key]}
                 )
                 
@@ -465,7 +468,10 @@ class ConfigManager:
             return config
         except TypeError as e:
             # Catch errors if merged_config_data has keys not in ServerConfig
-            raise MCPError(f"Configuration error for {server_name}: Invalid key found - {e}")
+            raise MCPError(
+                f"Configuration error for {server_name}: Invalid key found - {e}",
+                code=ErrorCode.INTERNAL_ERROR
+            )
         
     def save_config(self, config: ServerConfig, format: str = 'yaml') -> None:
         """Save configuration to file.

@@ -120,37 +120,27 @@ class BaseServer:
     """Base server class for all server implementations."""
 
     def __init__(self, app_name: str):
-        """Initialize the server.
+        """Initialize the server managers and config ONLY."""
         
-        Args:
-            app_name: Name of the application
-        """
-        # Create FastAPI app
-        self.app = FastAPI(
-            title=app_name,
-            docs_url=None,  # Will be set based on config
-            redoc_url=None  # Will be set based on config
-        )
+        # Remove app creation and configuration from __init__
+        # self.app = FastAPI(
+        #     title=app_name,
+        #     docs_url=None,
+        #     redoc_url=None
+        # )
+        # self.app.state.limiter = limiter
+        # self.app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
         
-        # Add rate limiter state to app
-        self.app.state.limiter = limiter
-        # Add rate limit exceeded handler
-        self.app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-        
-        # Initialize managers
+        # Initialize managers ONLY
         self._init_managers(app_name)
         
-        # Add state to app
-        self.app.state.config = self.config
-        self.app.state.logger = self.logger
-        self.app.state.monitor = self.monitor
-        self.app.state.security = self.security
-        
-        # Setup middleware
-        self._setup_middleware()
-        
-        # Initialize routes
-        self.register_routes()
+        # Defer app state setup, middleware, and routes to explicit calls
+        # self.app.state.config = self.config
+        # self.app.state.logger = self.logger
+        # self.app.state.monitor = self.monitor
+        # self.app.state.security = self.security
+        # self._setup_middleware()
+        # self.register_routes()
         
     def _init_managers(self, app_name: str) -> None:
         """Initialize server managers."""
@@ -175,24 +165,32 @@ class BaseServer:
         else:
             self.monitor = None
             
-        # Initialize security
+        # Restore SecurityManager initialization
         self.security = SecurityManager(
             api_keys=self.config.api_keys,
             enable_auth=self.config.enable_auth,
             auth_token=self.config.auth_token
         )
         
-    def _setup_middleware(self) -> None:
-        """Setup server middleware."""
+    def setup_app_state(self, app: FastAPI) -> None:
+        """Add server managers and config to the FastAPI app state."""
+        app.state.limiter = limiter
+        app.state.config = self.config
+        app.state.logger = self.logger
+        app.state.monitor = self.monitor
+        app.state.security = self.security
+
+    def setup_middleware(self, app: FastAPI) -> None:
+        """Setup server middleware on the provided app instance."""
         # Add error handling middleware
-        self.app.add_middleware(
+        app.add_middleware(
             ErrorHandlerMiddleware,
             logger=self.logger
         )
         
         # Add CORS middleware if origins are configured
         if self.config.allowed_origins:
-            self.app.add_middleware(
+            app.add_middleware(
                 CORSMiddleware,
                 allow_origins=self.config.allowed_origins,
                 allow_credentials=True,
@@ -202,21 +200,21 @@ class BaseServer:
             
         # Add GZip compression if enabled
         if self.config.enable_compression:
-            self.app.add_middleware(
+            app.add_middleware(
                 GZipMiddleware,
                 minimum_size=1000
             )
             
         # Add trusted host middleware
         if self.config.trusted_proxies:
-            self.app.add_middleware(
+            app.add_middleware(
                 TrustedHostMiddleware,
                 allowed_hosts=self.config.trusted_proxies
             )
             
         # Add session middleware if enabled
         if self.config.enable_sessions:
-            self.app.add_middleware(
+            app.add_middleware(
                 SessionMiddleware,
                 secret_key=self.config.session_secret,
                 session_cookie="session",
@@ -224,7 +222,7 @@ class BaseServer:
             )
         
         # Add state middleware (needed by rate limiter key func if custom logic used)
-        @self.app.middleware("http")
+        @app.middleware("http")
         async def add_state(request: Request, call_next):
             """Add state to request."""
             # Add state
@@ -236,47 +234,31 @@ class BaseServer:
             # Process request
             return await call_next(request)
             
-    def register_routes(self) -> None:
-        """Register API routes."""
+    def register_routes(self, app: FastAPI) -> None:
+        """Register API routes on the provided app instance."""
         # Enable API docs if configured
         if self.config.enable_docs:
-            self.app.docs_url = self.config.docs_url
-            self.app.redoc_url = self.config.redoc_url
-            self.app.openapi_url = self.config.openapi_url
+            # Assign docs attributes directly to the app
+            app.docs_url = self.config.docs_url
+            app.redoc_url = self.config.redoc_url
+            app.openapi_url = self.config.openapi_url
             
-        @self.app.get("/health")
+        @app.get("/health")
         @handle_exceptions()
         # @limiter.limit("10/second") # Temporarily removed for debugging 422 error
         async def health_check(request: Request) -> Dict[str, Any]:
-            """Health check endpoint."""
-            if not self.config.enable_health_checks:
-                return {"status": "disabled"}
-                
-            # Record resource metrics if monitoring enabled
-            if self.monitor:
-                self.monitor.record_resource_usage()
-                
+            """Provide a basic health check endpoint."""
+            # Access config and managers via self, not request.state
+            # as state might not be fully set during this route definition
             return {
                 "status": "healthy",
-                "service": self.app.title,
+                "service": self.config.name,
                 "version": self.config.version,
                 "monitoring": {
                     "metrics": self.config.enable_metrics,
                     "tracing": self.config.enable_tracing
                 }
             }
-            
-        # Remove the conflicting placeholder /api/v1/models route
-        # @self.app.get("/api/v1/models", tags=["Base"])
-        # @handle_exceptions()
-        # @limiter.limit("100/minute")
-        # async def list_models(
-        #     request: Request,
-        #     api_key: ApiKey = Depends(self.get_api_key)
-        # ) -> List[Dict[str, Any]]:
-        #     """List available models (placeholder for demonstration)."""
-        #     self.security.check_permission(api_key, "read")
-        #     return [{"name": "model1", "type": "llm"}, {"name": "model2", "type": "embedding"}]
             
     async def get_api_key(
         self,

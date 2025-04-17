@@ -14,3 +14,5 @@ from .server import create_app
 
 # Adjust __all__ accordingly
 __all__ = ["create_app"] # Or expose 'app' if created above 
+
+from .main import app 

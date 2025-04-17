@@ -134,7 +134,64 @@ def build_javascript_grammar():
         logger.error(f"Error building JavaScript grammar: {e}")
         return False
 
+def build_python_grammar():
+    """Build the Python grammar."""
+    try:
+        build_dir = Path(__file__).parent / 'build'
+        vendor_dir = build_dir.parent.parent.parent / 'vendor' # Adjust path to vendor relative to build script
+        build_dir.mkdir(exist_ok=True)
+
+        # Clone tree-sitter-python if not present
+        py_repo_path = vendor_dir / 'tree-sitter-python'
+        if not py_repo_path.exists():
+             logger.info(f"Cloning tree-sitter-python into {vendor_dir}...")
+             # Ensure vendor exists before cloning into it
+             vendor_dir.mkdir(exist_ok=True)
+             subprocess.run(['git', 'clone', 'https://github.com/tree-sitter/tree-sitter-python.git', str(py_repo_path)], check=True, cwd=vendor_dir)
+        else:
+            logger.info(f"tree-sitter-python already found at {py_repo_path}")
+
+        # Change to the Python repo directory
+        os.chdir(str(py_repo_path))
+
+        # Generate and build the grammar
+        logger.info(f"Building Python grammar in {py_repo_path}...")
+        subprocess.run(['tree-sitter', 'build'], check=True)
+        logger.info("Python grammar build command executed.")
+
+        # Determine expected library file based on OS and copy
+        # The standard build process for tree-sitter python *should* create python.so/python.dylib
+        lib_filename = 'python' + LIB_EXTENSION
+        built_lib_path = py_repo_path / lib_filename
+
+        if built_lib_path.exists():
+            target_path = build_dir / lib_filename
+            shutil.copy2(built_lib_path, target_path)
+            logger.info(f"Successfully copied {lib_filename} to {target_path}")
+            return True
+        else:
+            # Check common alternative name 'parser.so' just in case
+            alt_built_lib_path = py_repo_path / ('parser' + LIB_EXTENSION)
+            if alt_built_lib_path.exists():
+                 target_path = build_dir / lib_filename # Still copy as python.dylib/so
+                 shutil.copy2(alt_built_lib_path, target_path)
+                 logger.info(f"Successfully copied {alt_built_lib_path.name} as {lib_filename} to {target_path}")
+                 return True
+            else:
+                raise FileNotFoundError(f"Expected parser library {lib_filename} or {alt_built_lib_path.name} not found in {py_repo_path}")
+
+    except Exception as e:
+        logger.error(f"Error building Python grammar: {e}")
+        return False
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    build_languages()
-    build_javascript_grammar() 
+    logger.info("Starting grammar build process...")
+    js_success = build_javascript_grammar() # Keep JS build
+    py_success = build_python_grammar()
+    # swift_success = build_swift_grammar() # Placeholder for Swift
+
+    if js_success and py_success: # Add other languages as needed
+        logger.info("Grammar build process completed successfully for required languages.")
+    else:
+        logger.error("Grammar build process failed for one or more languages.") 

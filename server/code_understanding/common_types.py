@@ -18,6 +18,8 @@ class MockNode:
     parent: Optional['MockNode'] = None # Optional parent link
     fields: Dict[str, Any] = field(default_factory=dict) # For named children/attributes
     metadata: Dict[str, Any] = field(default_factory=dict) # For language-specific metadata
+    has_error: bool = False  # Flag to indicate if node has errors
+    is_missing: bool = False  # Flag to indicate if node is missing
 
     def __post_init__(self):
         """Initialize optional fields."""
@@ -106,10 +108,23 @@ class MockTree:
             error_details: List of error details if any.
             features: Dictionary of language-specific features (functions, classes, exports, etc.).
         """
-        self.root_node = root_node or MockNode(type='program', text='program')
+        # Only default to 'program' node if root_node is not explicitly provided (i.e., uses default None)
+        # If None is explicitly passed, keep it None.
+        self.root_node = root_node if root_node is not None else MockNode(type='program', text='program')
+        # A simpler way, assuming the default should be None if not provided:
+        # self.root_node = root_node 
+
+        # Let's adjust to keep None if None is passed
+        self.root_node = root_node # Keep root_node as passed, allows None
+
         self.has_errors = has_errors
         self.error_details = error_details or []
         self.features = features or {}
+        
+        # Add compatibility with tree-sitter
+        # These seem redundant with has_errors and error_details above?
+        # self.has_error = has_errors 
+        # self.errors = error_details or []
 
     @property
     def type(self) -> str:
